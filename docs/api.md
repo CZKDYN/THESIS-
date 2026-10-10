@@ -5,12 +5,15 @@ Browser APIs use the authenticated Flask session, server-side role checks, and `
 | Method | Path | Access / behavior |
 | --- | --- | --- |
 | GET | `/health` | Database connectivity and active environment mode. Not a functional readiness check. |
-| GET | `/api/snapshot` | Admin: all units. Tenant: assigned unit only. Optional `unit_id` is authorized server-side. |
+| GET | `/api/snapshot` | Admin: active units (empty list is valid). Tenant: active assigned unit only. Optional `unit_id` is authorized server-side. |
 | POST | `/api/load-requests` | Tenant submits `amount`, optional `note`, and unique client `reference`. Unit comes from the session, not the payload. |
 | POST | `/api/load-requests/<id>/review` | Admin; `decision` is `approved` or `rejected`. Second review returns 409. |
-| GET | `/api/transactions/export` | Scoped CSV, optional authorized `unit_id`, at most 10,000 records. |
+| GET | `/api/transactions/export` | Scoped CSV, optional authorized `unit_id`, at most 10,000 records. Admins may use `include_archived=true` to export retained history. |
 | GET / POST | `/api/rates` | Admin; history or `{ "rate": "12.85", "effective_at": "future timezone-aware ISO timestamp" }`. Omit effective date for now. |
 | POST | `/api/units` | Admin; `name`, `room`, `device_id`. Creates a hardware device and zero-credit account. |
+| GET | `/api/units` | Admin; `status=active` (default) or `status=archived`. |
+| POST | `/api/units/<id>/archive` | Admin; removes the unit from the active workspace, disables tenant access and meter ingestion, rejects pending load requests, and retains balances and all records. |
+| POST | `/api/units/<id>/restore` | Admin; restores the same unit, existing tenant login, and meter ingestion. Rejected requests stay rejected. |
 | POST | `/api/units/<id>/tenant` | Admin; `name`, `email`, `password` (12–128 chars). Creates an account in an unassigned unit. |
 | POST | `/api/iot/readings` | Device bearer authentication, scoped to the registered device and unit. |
 | GET | `/api/iot/instructions` | Device bearer authentication; returns an empty command list and `control_enabled=false`. |

@@ -15,6 +15,7 @@ ARTIFACTS.mkdir(exist_ok=True)
 
 
 def sign_in(page, email):
+    page.context.clear_cookies()
     page.goto(BASE + '/login')
     page.fill('#email', email)
     page.fill('#password', PASSWORD)
@@ -99,6 +100,41 @@ def main():
         admin.screenshot(path=ARTIFACTS/'admin-tablet.png',full_page=True)
         assert admin.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
         checks.append('1024px tablet dashboard has no horizontal page overflow')
+        unit_id = before['units'][0]['id']
+        admin.locator('#unit-filter').select_option(str(unit_id))
+        admin.wait_for_function("() => document.querySelectorAll('#unit-cards .unit-card').length===1")
+        admin.locator('.nav-link[data-view="units"]').click()
+        admin.locator(f'[data-remove="{unit_id}"]').click()
+        admin.locator('#confirm-dialog').get_by_role('button',name='Cancel',exact=True).click()
+        assert admin_context.request.get(BASE+'/api/snapshot').json()['units'][0]['id'] == unit_id
+        admin.locator(f'[data-remove="{unit_id}"]').click()
+        admin.get_by_role('button',name='Confirm',exact=True).click()
+        admin.wait_for_function("() => !document.querySelector('#confirm-dialog').open")
+        admin.locator(f'[data-remove="{unit_id}"]').wait_for(state='detached')
+        assert admin.locator('#unit-filter').input_value() == ''
+        assert tenant_context.request.get(BASE+'/api/snapshot').status == 401
+        admin.locator('#unit-status').select_option('archived')
+        admin.locator(f'[data-restore="{unit_id}"]').wait_for()
+        history = admin_context.request.get(BASE+f'/api/transactions/export?unit_id={unit_id}&include_archived=true')
+        assert history.status == 200 and 'credit' in history.text()
+        admin.screenshot(path=ARTIFACTS/'archived-units.png',full_page=True)
+        admin.locator(f'[data-restore="{unit_id}"]').click()
+        admin.get_by_role('button',name='Confirm',exact=True).click()
+        admin.wait_for_function("() => !document.querySelector('#confirm-dialog').open")
+        admin.locator(f'[data-restore="{unit_id}"]').wait_for(state='detached')
+        admin.locator('#unit-status').select_option('active')
+        admin.locator(f'[data-remove="{unit_id}"]').wait_for()
+        admin.set_viewport_size({'width':390,'height':844})
+        assert admin.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+        action = admin.locator(f'[data-remove="{unit_id}"]')
+        box = action.bounding_box()
+        assert box and box['x'] >= 0 and box['x'] + box['width'] <= 390
+        action.click()
+        admin.locator('#confirm-dialog').get_by_role('button',name='Cancel',exact=True).click()
+        admin.screenshot(path=ARTIFACTS/'unit-management-mobile.png',full_page=True)
+        sign_in(tenant,'tenant1@dormenergy.test')
+        assert tenant_context.request.get(BASE+'/api/snapshot').status == 200
+        checks.append('Remove confirmation/cancel, filtered-unit removal, archived history, tenant revocation, restore, and mobile unit management work')
         assert not errors, errors
         checks.append('No JavaScript or browser console errors')
         result={'checks_passed':len(checks),'checks':checks,'errors':errors,'sample_request_id':submitted['id']}

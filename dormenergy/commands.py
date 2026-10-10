@@ -10,7 +10,7 @@ from sqlalchemy import select
 from werkzeug.security import generate_password_hash
 from .extensions import db
 from .models import Account, AuditLog, Device, LoadRequest, Notification, Rate, Transaction, Unit, User, utcnow
-from .services.billing import ingest_reading
+from .services.billing import DomainError, ingest_reading, lock_unit
 from .services.simulation import simulation_step
 
 
@@ -96,6 +96,11 @@ def register_commands(app):
         device = db.session.scalar(select(Device).where(Device.identifier == identifier))
         if not device or device.source != 'hardware':
             raise click.ClickException('Register a hardware device first. Demo devices cannot become hardware devices.')
+        try:
+            lock_unit(device.unit_id)
+        except DomainError as error:
+            db.session.rollback()
+            raise click.ClickException(error.message) from None
         token = secrets.token_urlsafe(40)
         device.token_hash = generate_password_hash(token)
         db.session.add(AuditLog(action='device_token_rotated', detail=f'Device {device.id} token rotated'))

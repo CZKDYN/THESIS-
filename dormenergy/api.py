@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from .extensions import db
 from .models import Account, AuditLog, Device, DeviceEvent, LoadRequest, Notification, Rate, Reading, Transaction, Unit, User, utcnow
-from .services.billing import DomainError, aware, decimal_value, resolve_load
+from .services.billing import DomainError, aware, decimal_value, lock_unit, resolve_load
 
 api = Blueprint('api', __name__)
 MANILA = ZoneInfo('Asia/Manila')
@@ -34,8 +34,10 @@ def admin_required(function):
     return wrapped
 
 
-def scoped_units():
+def scoped_units(include_archived=False):
     query = select(Unit).order_by(Unit.id)
+    if not include_archived:
+        query = query.where(Unit.archived_at.is_(None))
     if current_user.role != 'admin':
         query = query.where(Unit.id == current_user.unit_id)
     selected = request.args.get('unit_id')
@@ -48,7 +50,7 @@ def scoped_units():
             abort(403)
         query = query.where(Unit.id == selected)
     units = db.session.scalars(query).all()
-    if not units:
+    if not units and (selected or current_user.role != 'admin'):
         abort(404)
     return units
 
@@ -74,9 +76,9 @@ def unit_json(unit):
     latest = db.session.scalar(select(Reading).where(Reading.device_id == device.id).order_by(Reading.timestamp.desc()).limit(1)) if device else None
     recent = bool(device and device.last_seen and (utcnow() - aware(device.last_seen)).total_seconds() < 30)
     fresh = bool(latest and (utcnow() - aware(latest.timestamp)).total_seconds() < 90)
-    online = recent and fresh
+    online = recent and fresh and not unit.archived_at
     tenant = db.session.scalar(select(User).where(User.unit_id == unit.id, User.role == 'tenant'))
-    return dict(id=unit.id, name=unit.name, room=unit.room, tenant=tenant.name if tenant else 'Unassigned',
+    return dict(id=unit.id, name=unit.name, room=unit.room, archived_at=iso(unit.archived_at), tenant=tenant.name if tenant else 'Unassigned',
                 balance=str(account.balance) if account else '0', threshold=str(account.low_threshold) if account else '100',
                 power_status=unit.power_status if online else 'unknown', last_power_status=unit.power_status,
                 online=online, gateway_online=recent,
@@ -140,6 +142,7 @@ def snapshot():
 def create_load_request():
     if current_user.role != 'tenant':
         abort(403)
+    lock_unit(current_user.unit_id)
     payload = json_payload()
     amount = decimal_value(payload.get('amount'), 'amount', Decimal('100000'))
     if amount < 10 or amount != amount.quantize(Decimal('0.01')):
@@ -213,11 +216,55 @@ def register_unit():
     return jsonify(message='Unit registered. Provision device authentication using the documented CLI.', id=unit.id), 201
 
 
+@api.get('/units')
+@admin_required
+def list_units():
+    status = request.args.get('status', 'active')
+    if status not in ('active', 'archived'):
+        raise DomainError('Choose active or archived units.')
+    query = select(Unit).order_by(Unit.id)
+    query = query.where(Unit.archived_at.is_(None) if status == 'active' else Unit.archived_at.is_not(None))
+    return jsonify(units=[unit_json(unit) for unit in db.session.scalars(query).all()])
+
+
+@api.post('/units/<int:unit_id>/archive')
+@admin_required
+def archive_unit(unit_id):
+    unit = lock_unit(unit_id)
+    pending = db.session.scalars(select(LoadRequest.id).where(
+        LoadRequest.unit_id == unit.id, LoadRequest.status == 'pending').order_by(LoadRequest.id)).all()
+    for request_id in pending:
+        resolve_load(request_id, 'rejected', current_user)
+    unit.archived_at = utcnow()
+    tenant = db.session.scalar(select(User).where(User.unit_id == unit.id, User.role == 'tenant'))
+    if tenant:
+        tenant.active = False
+    db.session.add(AuditLog(actor_id=current_user.id, action='unit_archived',
+                           detail=f'Unit {unit.id} ({unit.name}) removed; records retained; {len(pending)} pending requests rejected.'))
+    db.session.commit()
+    return jsonify(message='Unit removed. Records are retained under Archived units.', id=unit.id)
+
+
+@api.post('/units/<int:unit_id>/restore')
+@admin_required
+def restore_unit(unit_id):
+    unit = lock_unit(unit_id, allow_archived=True)
+    if not unit.archived_at:
+        raise DomainError('This unit is already active.', 409)
+    unit.archived_at = None
+    tenant = db.session.scalar(select(User).where(User.unit_id == unit.id, User.role == 'tenant'))
+    if tenant:
+        tenant.active = True
+    db.session.add(AuditLog(actor_id=current_user.id, action='unit_restored',
+                           detail=f'Unit {unit.id} ({unit.name}) restored with its existing records and account.'))
+    db.session.commit()
+    return jsonify(message='Unit restored. Its existing tenant account can sign in again.', id=unit.id)
+
+
 @api.post('/units/<int:unit_id>/tenant')
 @admin_required
 def assign_tenant(unit_id):
-    if not db.session.get(Unit, unit_id):
-        abort(404)
+    lock_unit(unit_id)
     payload = json_payload()
     name, email, password = (payload.get(k, '') for k in ('name', 'email', 'password'))
     if not isinstance(name, str) or not 1 <= len(name.strip()) <= 100 or not isinstance(email, str) or '@' not in email or len(email) > 254:
@@ -237,7 +284,8 @@ def assign_tenant(unit_id):
 @api.get('/transactions/export')
 @login_required
 def export_transactions():
-    ids = [u.id for u in scoped_units()]
+    include_archived = current_user.role == 'admin' and request.args.get('include_archived') == 'true'
+    ids = [u.id for u in scoped_units(include_archived=include_archived)]
     rows = db.session.scalars(select(Transaction).where(Transaction.unit_id.in_(ids)).order_by(Transaction.created_at.desc()).limit(10000)).all()
     output = io.StringIO()
     writer = csv.writer(output)

@@ -13,6 +13,17 @@ class DomainError(Exception):
         self.message, self.status = message, status
 
 
+def lock_unit(unit_id, allow_archived=False):
+    """Serialize unit removal with tenant, credit, and meter updates."""
+    unit = db.session.scalar(select(Unit).where(Unit.id == unit_id).with_for_update()
+                             .execution_options(populate_existing=True))
+    if not unit:
+        raise DomainError('Unit not found.', 404)
+    if unit.archived_at and not allow_archived:
+        raise DomainError('This unit has been removed. Restore it before making changes.', 409)
+    return unit
+
+
 def decimal_value(value, field, maximum=Decimal('1000000000')):
     if isinstance(value, bool) or value is None:
         raise DomainError(f'{field} must be a valid nonnegative number.')
@@ -63,9 +74,12 @@ def charge_for_interval(delta, start, end):
 def ingest_reading(device_id, payload, source):
     if not isinstance(payload, dict):
         raise DomainError('A JSON object is required.')
-    device = db.session.scalar(select(Device).where(Device.id == device_id).with_for_update())
+    device = db.session.get(Device, device_id)
     if not device or device.source != source:
         raise DomainError('Device source does not match this transmission.', 403)
+    unit = lock_unit(device.unit_id)
+    device = db.session.scalar(select(Device).where(Device.id == device_id).with_for_update()
+                               .execution_options(populate_existing=True))
     if payload.get('device_id') != device.identifier or payload.get('unit_id') != device.unit_id:
         raise DomainError('Device and unit must match the registered device.', 403)
     event_id, epoch = payload.get('event_id'), payload.get('meter_epoch')
@@ -92,7 +106,6 @@ def ingest_reading(device_id, payload, source):
     start = timestamp if reset or device.last_timestamp is None else aware(device.last_timestamp)
     cost, rate = charge_for_interval(delta, start, timestamp)
     account = db.session.scalar(select(Account).where(Account.unit_id == device.unit_id).with_for_update())
-    unit = db.session.get(Unit, device.unit_id)
     previous_status = unit.power_status
     reading = Reading(device_id=device.id, event_id=event_id, timestamp=timestamp, voltage=voltage,
                       current=current, power=power, energy=energy, delta_kwh=delta, rate_id=rate.id,
@@ -125,9 +138,12 @@ def ingest_reading(device_id, payload, source):
 def resolve_load(request_id, decision, actor):
     if decision not in ('approved', 'rejected'):
         raise DomainError('Choose approved or rejected.')
-    load = db.session.scalar(select(LoadRequest).where(LoadRequest.id == request_id).with_for_update())
+    load = db.session.get(LoadRequest, request_id)
     if load is None:
         raise DomainError('Load request not found.', 404)
+    lock_unit(load.unit_id)
+    load = db.session.scalar(select(LoadRequest).where(LoadRequest.id == request_id).with_for_update()
+                             .execution_options(populate_existing=True))
     if load.status != 'pending':
         raise DomainError('This request has already been reviewed. No credit was added twice.', 409)
     account = db.session.scalar(select(Account).where(Account.unit_id == load.unit_id).with_for_update())

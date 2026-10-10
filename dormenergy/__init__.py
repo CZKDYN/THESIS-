@@ -49,7 +49,10 @@ def create_app(test_config=None):
     @login_manager.user_loader
     def load_user(user_id):
         try:
-            return db.session.get(User, int(user_id))
+            user = db.session.get(User, int(user_id))
+            if not user or not user.active or (user.role == 'tenant' and user.unit.archived_at):
+                return None
+            return user
         except (ValueError, TypeError):
             return None
 

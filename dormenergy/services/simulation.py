@@ -4,15 +4,20 @@ import random
 from decimal import Decimal
 from sqlalchemy import select
 from ..extensions import db
-from ..models import Account, Device, DeviceEvent, utcnow
-from .billing import aware, ingest_reading
+from ..models import Account, Device, DeviceEvent, Unit, utcnow
+from .billing import aware, ingest_reading, lock_unit
 
 
 def simulation_step():
     now = utcnow()
     count = 0
-    devices = db.session.scalars(select(Device).where(Device.source == 'simulation').order_by(Device.id)).all()
+    devices = db.session.scalars(select(Device).join(Unit).where(
+        Device.source == 'simulation', Unit.archived_at.is_(None)).order_by(Device.id)).all()
     for device in devices:
+        unit = lock_unit(device.unit_id, allow_archived=True)
+        if unit.archived_at:
+            db.session.commit()
+            continue
         # The ingest service serializes updates with a database row lock.
         device = db.session.scalar(select(Device).where(Device.id == device.id).with_for_update())
         if device.last_timestamp and aware(device.last_timestamp) >= now:

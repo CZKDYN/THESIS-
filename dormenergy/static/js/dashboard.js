@@ -12,6 +12,7 @@ const badge = value => `<span class="badge badge-${html(value)}"><span class="mi
 const empty = (message, cols) => cols ? `<tr><td colspan="${cols}" class="empty-state">${html(message)}</td></tr>` : `<div class="empty-state">${html(message)}</div>`;
 let state, view = 'overview', period = 'daily', overviewChart, detailChart, snapshotBusy = false, confirmCallback, toastTimeout;
 let requestReference = crypto.randomUUID();
+let archivedUnits = [];
 const titles = {
   overview:['Dormitory overview','A clear view of your units, usage, and prepaid energy.'],
   units:['Dormitory units','Every unit, connected in one place.'],
@@ -116,13 +117,14 @@ function render() {
     <div class="unit-card"><div class="unit-card-head"><span class="unit-avatar">${icon('home')}</span><div><h3>${html(u.name)}</h3><div class="unit-room">${html(u.room)}</div></div>${badge(u.power_status)}</div>
     <div class="unit-balance-label">Available prepaid balance</div><div class="unit-balance">${pesos(u.balance)}</div><div class="balance-track"><div class="balance-fill ${Number(u.balance)<=Number(u.threshold)?'low':''}" data-progress="${Math.max(0,Math.min(100,Number(u.balance)/1000*100))}"></div></div>
     <div class="unit-metrics"><div><span>Used today</span><strong>${num(u.today_kwh)} <small>kWh</small></strong></div><div><span>Current power</span><strong>${u.power===null?'—':num(u.power,0)} <small>W</small></strong></div></div><div class="unit-card-foot"><span>${html(u.source==='simulation'?'Simulated meter':'Hardware meter')}</span><button class="text-button" data-unit="${u.id}">${admin?'View unit':'View consumption'} ${icon('arrow')}</button></div></div>`).join('');
+  if (!units.length) $('#unit-cards').innerHTML = empty('No active units. Register a unit or restore one from Dormitory units.');
   $$('[data-progress]').forEach(el=>el.style.width=el.dataset.progress+'%');
   $('#recent-transactions').innerHTML = state.transactions.slice(0,4).map(activityRow).join('') || empty('No activity yet.');
   const lowBalanceAlerts = units.filter(u=>Number(u.balance)<=Number(u.threshold)).map(u=>({kind:'low_balance',message:`${u.name}: prepaid credit is ${pesos(u.balance)}. A top-up may be needed.`,timestamp:state.updated_at}));
   const offlineAlerts = units.filter(u=>!u.online).map(u=>({kind:'device',message:`${u.name}: no fresh meter reading. Live measurements are unavailable.`,timestamp:u.reading_at}));
   const alerts = [...lowBalanceAlerts,...offlineAlerts,...state.notifications].slice(0,3);
   $('#overview-alerts').innerHTML = alerts.map(alertRow).join('') || empty('All clear. No account or device alerts.');
-  $('#units-table').innerHTML = units.map(u=>`<tr><td><strong>${html(u.name)}</strong><small>${html(u.room)}</small></td><td>${html(u.tenant)}</td><td><strong>${pesos(u.balance)}</strong></td><td>${html(u.device)}<small>${html(u.source)}</small></td><td>${badge(u.power_status)}</td><td>${u.tenant==='Unassigned'?`<button class="btn btn-secondary btn-small" data-assign="${u.id}">Assign tenant</button>`:`<button class="text-button" data-unit="${u.id}">View ${icon('arrow')}</button>`}</td></tr>`).join('');
+  if (admin) renderUnits();
   $('#loads-table').innerHTML = state.requests.map(r=>`<tr><td><strong>${html(r.reference)}</strong><small>${html(date(r.timestamp))}</small></td><td>${html(r.unit)}<small>${html(r.tenant)}</small></td><td><strong>${pesos(r.amount)}</strong></td><td>${badge(r.status)}</td><td class="wrap-cell">${admin && r.status==='pending'?`<div class="review-buttons"><button class="btn btn-primary btn-small" data-review="${r.id}" data-decision="approved">Approve</button><button class="btn btn-danger btn-small" data-review="${r.id}" data-decision="rejected">Reject</button></div>${r.note?`<small>${html(r.note)}</small>`:''}`:html(r.note || 'Reviewed by administrator')}</td></tr>`).join('') || empty('No load requests yet. New requests will appear here.',5);
   $('#transactions-table').innerHTML = state.transactions.map(t=>`<tr><td>${html(date(t.timestamp))}</td><td>${html(t.unit)}</td><td class="wrap-cell">${html(t.description)}</td><td class="${Number(t.amount)>0?'positive':'negative'}">${Number(t.amount)>0?'+':'−'}${exactPesos(t.amount)}</td><td>${pesos(t.balance_after)}</td></tr>`).join('') || empty('No transactions recorded yet.',5);
   $('#notifications-list').innerHTML = state.notifications.map(alertRow).join('') || empty('No notifications yet.');
@@ -134,12 +136,20 @@ function render() {
   renderOverviewChart();
   if (view==='consumption') renderDetailChart();
 }
+function renderUnits() {
+  const archived = $('#unit-status').value === 'archived';
+  const units = archived ? archivedUnits : state.units;
+  $('#units-table').innerHTML = units.map(u=>`<tr><td><strong>${html(u.name)}</strong><small>${html(u.room)}${archived?` · Removed ${html(date(u.archived_at))}`:''}</small></td><td>${html(u.tenant)}</td><td><strong>${pesos(u.balance)}</strong></td><td>${html(u.device)}<small>${html(u.source)}</small></td><td>${badge(archived?'archived':u.power_status)}</td><td><div class="unit-actions">${archived?`<a class="text-button" href="/api/transactions/export?unit_id=${u.id}&include_archived=true">Export history</a><button class="btn btn-secondary btn-small" data-restore="${u.id}">Restore unit</button>`:`${u.tenant==='Unassigned'?`<button class="btn btn-secondary btn-small" data-assign="${u.id}">Assign tenant</button>`:`<button class="text-button" data-unit="${u.id}">View ${icon('arrow')}</button>`}<button class="btn btn-danger btn-small" data-remove="${u.id}">Remove unit</button>`}</div></td></tr>`).join('') || empty(archived?'No archived units.':'No active units. Register a unit to get started.',6);
+}
 async function refresh() {
   if(snapshotBusy) return;
   snapshotBusy=true;
   try {
     const filter = $('#unit-filter')?.value;
     state=await api('/api/snapshot'+(filter?`?unit_id=${filter}`:''));
+    if (state.user.role === 'admin' && $('#unit-status').value === 'archived') {
+      archivedUnits = (await api('/api/units?status=archived')).units;
+    }
     $('#connection-alert').hidden=true;
     render();
   } catch(error) {
@@ -181,6 +191,10 @@ document.addEventListener('click',event=>{
   if(button.dataset.review){const item=state.requests.find(r=>r.id===Number(button.dataset.review));const decision=button.dataset.decision;
     confirm(`${decision==='approved'?'Approve':'Reject'} this load request?`,`${item.unit} · ${pesos(item.amount)}. ${decision==='approved'?'This adds prepaid credit once and records a transaction.':'No credit will be added. The tenant will be notified.'}`,async()=>{const result=await api(`/api/load-requests/${item.id}/review`,{decision});toast(result.message);});}
   if(button.dataset.assign){const unit=state.units.find(u=>u.id===Number(button.dataset.assign));$('#tenant-form input[name="unit_id"]').value=unit.id;$('#assignment-label').textContent=`Create a tenant account for ${unit.name}.`;$('#tenant-dialog .form-error').hidden=true;$('#tenant-dialog').showModal();}
+  if(button.dataset.remove){const unit=state.units.find(u=>u.id===Number(button.dataset.remove));
+    confirm(`Remove ${unit.name}?`,'This archives the unit and retains its balance and history. Tenant access and meter updates will stop. Pending load requests will be rejected. You can restore the unit from Archived units.',async()=>{const result=await api(`/api/units/${unit.id}/archive`,{});$('#unit-filter').value='';toast(result.message);});}
+  if(button.dataset.restore){const unit=archivedUnits.find(u=>u.id===Number(button.dataset.restore));
+    confirm(`Restore ${unit.name}?`,'This restores the existing unit and balance. Its assigned tenant can sign in again, and meter updates can resume. Previously rejected requests stay rejected.',async()=>{const result=await api(`/api/units/${unit.id}/restore`,{});$('#unit-filter').value='';toast(result.message);});}
 });
 function bindForm(selector, endpoint, payloadBuilder, onSuccess) {
   const form=$(selector);if(!form)return;
@@ -201,6 +215,7 @@ $('#rate-form')?.addEventListener('submit',event=>{
   confirm('Save this electricity rate?',`${pesos(values.rate)} per kWh, effective ${values.effective_at?date(payload.effective_at):'now'}. Earlier charges remain unchanged.`,async()=>{const result=await api('/api/rates',payload);toast(result.message);await loadRates();});
 });
 $('#unit-filter')?.addEventListener('change',refresh);
+$('#unit-status')?.addEventListener('change',refresh);
 $('#detail-period').addEventListener('change',()=>{if(state)renderDetailChart();});
 $('#mobile-menu').addEventListener('click',()=>{const open=$('#sidebar').classList.toggle('is-open');$('#sidebar-scrim').hidden=!open;$('#mobile-menu').setAttribute('aria-expanded',String(open));});
 $('#sidebar-scrim').addEventListener('click',()=>{$('#sidebar').classList.remove('is-open');$('#sidebar-scrim').hidden=true;$('#mobile-menu').setAttribute('aria-expanded','false');});

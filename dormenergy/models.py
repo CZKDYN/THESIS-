@@ -17,6 +17,7 @@ class Unit(db.Model):
     room = db.Column(db.String(80), nullable=False)
     power_status = db.Column(db.String(24), nullable=False, default="unknown")
     is_demo = db.Column(db.Boolean, nullable=False, default=False)
+    archived_at = db.Column(db.DateTime(timezone=True))
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     account = db.relationship("Account", uselist=False, back_populates="unit")
     device = db.relationship("Device", uselist=False, back_populates="unit")

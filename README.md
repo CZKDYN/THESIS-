@@ -24,7 +24,7 @@ See [deployment instructions](docs/deployment.md) for build commands, troublesho
 
 - Shared login, hashed passwords, eight-hour sessions, CSRF protection, login throttling, logout, and server-side administrator/tenant authorization.
 - Responsive navy/teal dashboard, mobile sidebar, locally bundled Chart.js, hourly/daily/30-day consumption charts, and 10-second polling.
-- Administrator overview, unit registration, tenant account assignment, balances, credit-request approval/rejection, historical rates, transaction export, device monitoring, and notifications.
+- Administrator overview, unit registration, tenant account assignment, unit removal/restoration, balances, credit-request approval/rejection, historical rates, transaction export, device monitoring, and notifications.
 - Tenant views restricted to their assigned unit, measurements, balance, credit requests, transactions, and notifications. Changing `unit_id` cannot access another unit.
 - Three simulated dormitory units, seven days of explicitly synthetic history, a separate five-second simulator, and labeled simulation accounts. No physical hardware is needed.
 - Fixed-point decimal billing, cumulative meter deltas, atomic PostgreSQL account updates, duplicate protection, ordered replay, explicit meter-reset baselines, and auditable credit/billing records.
@@ -92,6 +92,8 @@ The current cloud instance was seeded with the following **public, development-o
 | Tenant | `tenant3@dormenergy.test` | `DormEnergyDemo!2026` | Unit 03 |
 
 These are not production accounts. If you supply a different seed password, all four accounts use that password. The demo seed creates one PHP 500 pending request for Unit 02. Browser smoke testing creates additional clearly named sample requests and recorded approvals.
+
+To remove a unit, sign in as an administrator, open **Dormitory units**, click **Remove unit**, and confirm. Removal archives the unit: its balance and history are retained, tenant access and meter updates stop, and pending load requests are rejected. Choose **Archived units** to export retained transaction history or **Restore unit** to reactivate the same unit and tenant account. Restoring does not reopen rejected requests. Archived unit names, device identifiers, and tenant emails remain reserved; removal does not erase records or free them for another account. Physical power switching is unchanged.
 
 ## Linux/macOS setup
 

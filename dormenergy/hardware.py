@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify, request, current_app
 from sqlalchemy import select
 from werkzeug.security import check_password_hash
 from .extensions import db
-from .models import Device
+from .models import Device, Unit
 from .services.billing import DomainError, ingest_reading
 
 hardware = Blueprint('hardware', __name__)
@@ -13,7 +13,8 @@ def authorized_device():
     authorization = request.headers.get('Authorization', '')
     if not authorization.startswith('Bearer ') or len(authorization) > 1024:
         return None
-    device = db.session.scalar(select(Device).where(Device.identifier == identifier))
+    device = db.session.scalar(select(Device).join(Unit).where(
+        Device.identifier == identifier, Unit.archived_at.is_(None)))
     if not device or device.source != 'hardware' or not device.token_hash:
         return None
     return device if check_password_hash(device.token_hash, authorization[7:]) else None

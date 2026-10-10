@@ -26,7 +26,7 @@ def login():
             return render_template('login.html'), 429
         user = db.session.scalar(select(User).where(User.email == email))
         valid = check_password_hash(user.password_hash if user else DUMMY_HASH, password)
-        if not user or not valid or not user.active:
+        if not user or not valid or not user.active or (user.role == 'tenant' and user.unit.archived_at):
             db.session.add(AuditLog(action='login_failed', detail=email))
             db.session.commit()
             flash('Email or password is incorrect.', 'error')
