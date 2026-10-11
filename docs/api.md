@@ -5,7 +5,9 @@ Browser APIs use the authenticated Flask session, server-side role checks, and `
 | Method | Path | Access / behavior |
 | --- | --- | --- |
 | GET | `/health` | Database connectivity and active environment mode. Not a functional readiness check. |
-| GET | `/api/snapshot` | Admin: active units (empty list is valid). Tenant: active assigned unit only. Optional `unit_id` is authorized server-side. |
+| GET | `/api/snapshot` | Admin: active units (empty list is valid). Tenant: active assigned unit only. Optional `unit_id` is authorized server-side. Includes the selected unit's forecast, or `select_unit` for an aggregate view. |
+| GET | `/api/forecast` | Scoped unit forecast, model/evaluation metadata, latest job status, source label, and horizon-limited duration. Admins may select `unit_id`; tenants cannot access another unit. Archived units return 404. |
+| POST | `/api/units/<id>/forecast/train` | Admin + CSRF; queues training for an active metered unit, returns 202 and `job_id`. An existing pending/running job is reused. Synthetic jobs require simulation mode. |
 | POST | `/api/load-requests` | Tenant submits `amount`, optional `note`, and unique client `reference`. Unit comes from the session, not the payload. |
 | POST | `/api/load-requests/<id>/review` | Admin; `decision` is `approved` or `rejected`. Second review returns 409. |
 | GET | `/api/transactions/export` | Scoped CSV, optional authorized `unit_id`, at most 10,000 records. Admins may use `include_archived=true` to export retained history. |
@@ -17,6 +19,12 @@ Browser APIs use the authenticated Flask session, server-side role checks, and `
 | POST | `/api/units/<id>/tenant` | Admin; `name`, `email`, `password` (12–128 chars). Creates an account in an unassigned unit. |
 | POST | `/api/iot/readings` | Device bearer authentication, scoped to the registered device and unit. |
 | GET | `/api/iot/instructions` | Device bearer authentication; returns an empty command list and `control_enabled=false`. |
+
+## Forecast responses
+
+Forecast status is `select_unit`, `insufficient_data`, `waiting_for_readings`, or `available`. An available response contains future hourly `points` (`timestamp` and decimal `kwh`), `generated_at`, `horizon_hours`, and an optional `remaining_duration` in seconds. A null duration is an unsupported estimate, not zero remaining credit. `model` includes the version, training time, source, synthetic flag, coverage, chronological splits, test metrics, baselines, and held-out comparison points. `job` is null or contains `id`, `status`, and `message`.
+
+Training is asynchronous: 202 means queued, not successfully trained. Poll the scoped forecast endpoint or dashboard for a completed/failed job. Missing training coverage can fail a job while an existing model remains available. Forecasting never modifies balances or sends actuator commands. See [forecasting methods](forecasting.md) for assumptions and interpretation.
 
 ## Hardware transmission
 

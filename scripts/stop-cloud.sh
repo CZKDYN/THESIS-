@@ -2,7 +2,7 @@
 # Stops only PIDs recorded by start-cloud.sh, after verifying their command lines.
 set -euo pipefail
 cloud_state=/workspace/.dormenergy-cloud
-for name in app simulator; do
+for name in app simulator forecaster; do
   pidfile="$cloud_state/$name.pid"
   if [[ -f "$pidfile" ]]; then
     pid=$(cat "$pidfile")
@@ -10,6 +10,7 @@ for name in app simulator; do
       command_line=$(tr '\0' ' ' < "/proc/$pid/cmdline")
       expected='--app wsgi run'
       if [[ "$name" == simulator ]]; then expected='--app wsgi simulate'; fi
+      if [[ "$name" == forecaster ]]; then expected='--app wsgi forecast-worker'; fi
       if [[ "$command_line" == *"$expected"* ]]; then
         kill "$pid"
       else

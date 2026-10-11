@@ -4,7 +4,7 @@
 
 Polytechnic University of the Philippines · Diploma in Electrical Engineering Technology
 
-DormEnergy is a working Flask/PostgreSQL thesis prototype. **Phase 1 is implemented**, with a functioning prepaid workflow and a monitoring-only hardware API foundation. It is not a deployed production service or a validated electrical-control system.
+DormEnergy is a working Flask/PostgreSQL thesis prototype with prepaid accounting, a monitoring-only hardware API, and per-unit XGBoost consumption forecasting. Models trained on demonstration readings are labeled synthetic; real-device accuracy and electrical control require separate experiments.
 
 [![Build and test](https://github.com/CZKDYN/THESIS-/actions/workflows/build.yml/badge.svg)](https://github.com/CZKDYN/THESIS-/actions/workflows/build.yml)
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2FCZKDYN%2FTHESIS-)
@@ -13,7 +13,7 @@ DormEnergy is a working Flask/PostgreSQL thesis prototype. **Phase 1 is implemen
 
 **[Open the Render deployment setup](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2FCZKDYN%2FTHESIS-)** to deploy the complete demonstration, including PostgreSQL. Sign in to Render and grant access to this GitHub repository. Enter a development-only `DEMO_PASSWORD` of 12–128 characters when prompted, review the plans shown, then deploy. That chosen password is used for `admin@dormenergy.test` and `tenant1@dormenergy.test` through `tenant3@dormenergy.test` on the new hosted database. The local public example password is not automatically embedded in the hosted application.
 
-`render.yaml` configures the pinned Python build, managed PostgreSQL connection, generated session secret, HTTPS cookies, health check, migrations, three seeded units, and a single simulator alongside Gunicorn. After deployment succeeds, Render displays the actual public service URL; open its `/login` page. **The setup button is a deployment link, not an already-live website.** The application also works if the host supplies `postgres://` or `postgresql://` URLs; it selects the installed psycopg driver while preserving connection options.
+`render.yaml` configures the pinned Python build, managed PostgreSQL connection, generated session secret, HTTPS cookies, health check, migrations, three seeded units, one simulator, and one forecasting worker alongside Gunicorn. Initial demo models are queued automatically; select a unit and open **Forecasting** to inspect results or request retraining. After deployment succeeds, Render displays the actual public service URL; open its `/login` page. **The setup button is a deployment link, not an already-live website.** Standard hosted PostgreSQL URL prefixes are normalized to the installed psycopg driver while preserving connection options.
 
 The blueprint requests free demo plans. Free web services can sleep when idle, pausing simulation, and free PostgreSQL availability/expiry limits apply. Review Render's current plan terms before using this for a defense or keeping long-term research data; choose an appropriate plan deliberately. No paid service is provisioned by these project files alone. GitHub Actions runs the PostgreSQL test/build workflow on pushes to `main`; inspect [build results](https://github.com/CZKDYN/THESIS-/actions/workflows/build.yml) after pushing.
 
@@ -29,7 +29,8 @@ See [deployment instructions](docs/deployment.md) for build commands, troublesho
 - Three simulated dormitory units, seven days of explicitly synthetic history, a separate five-second simulator, and labeled simulation accounts. No physical hardware is needed.
 - Fixed-point decimal billing, cumulative meter deltas, atomic PostgreSQL account updates, duplicate protection, ordered replay, explicit meter-reset baselines, and auditable credit/billing records.
 - Scoped hardware bearer authentication, source isolation, range validation, timestamps, gateway arrival versus measurement freshness, and monitoring-only device instructions.
-- Versioned Alembic migrations for all twelve required tables. Forecast schema and honest “Insufficient historical data” UI are prepared; **XGBoost training is not implemented yet**.
+- Per-unit CPU XGBoost training, chronological evaluation, persistence/seasonal baselines, upcoming hourly predictions, comparison charts, and forecast-limited credit-duration estimates. Administrators queue training; tenants see only their unit's results.
+- Versioned Alembic migrations for fourteen tables, including database-stored model artifacts and background training jobs. Missing history or recent coverage produces an explicit status instead of invented predictions.
 
 The seed intentionally includes an exhausted sample account to demonstrate a disconnected **simulated** supply. A negative ledger balance records already measured consumption beyond available credit; it is never silently erased or presented as successful physical disconnection.
 
@@ -37,7 +38,7 @@ The seed intentionally includes an exhausted sample account to demonstrate a dis
 
 Python 3.12 (3.11+ supported), PostgreSQL 17 (16+ suitable), Git, and a modern browser. No Node.js or frontend build is needed. Use VS Code with its Python extension and select the `.venv` interpreter. PostgreSQL is the primary database; temporary SQLite is supported only for portable backend tests.
 
-`requirements.lock.txt` pins the tested Python dependency set. `requirements.txt` lists direct dependencies. `requirements-ml.txt` reserves Pandas, NumPy, XGBoost, and scikit-learn for Phase 4; installing it does not produce a model. Chart.js 4.4.8 is vendored with its license and was checked against the npm SHA-512 package integrity record.
+`requirements.lock.txt` pins the tested dependency set, including NumPy, SciPy, and CPU XGBoost. Linux uses `xgboost-cpu` to avoid GPU dependencies; other platforms use the standard XGBoost package in CPU mode. `requirements.txt` lists direct dependencies and `requirements-ml.txt` includes the runtime lockfile. Models use XGBoost's native Booster API and JSON artifacts stored in PostgreSQL. Chart.js 4.4.8 is vendored with its license and was checked against the npm SHA-512 package integrity record.
 
 ## Windows setup (PowerShell)
 
@@ -78,7 +79,13 @@ In a second PowerShell terminal, activate the same virtual environment and run:
 flask --app wsgi simulate --interval 5
 ```
 
-Open the local application on port **5000**, at `/login`. The two processes must run together for live simulation. `seed-demo` is repeatable: it preserves existing demo data rather than recreating balances. It refuses to seed a database containing non-demo data. You may supply your own development password instead of the public example, or omit `DEMO_PASSWORD` to be prompted securely.
+In a third terminal, activate the same virtual environment and start forecasting:
+
+```powershell
+flask --app wsgi forecast-worker --interval 10 --demo-models
+```
+
+Open the local application on port **5000**, at `/login`. Keep the web server, simulator, and forecasting worker running. `seed-demo` preserves existing demo data rather than recreating balances and refuses to seed a database containing non-demo data. You may supply your own development password instead of the public example, or omit `DEMO_PASSWORD` to be prompted securely.
 
 ## Demonstration accounts
 
@@ -97,7 +104,7 @@ To remove a unit, sign in as an administrator, open **Dormitory units**, click *
 
 ## Linux/macOS setup
 
-Create and activate a virtual environment, install `requirements.lock.txt`, create the PostgreSQL role/databases as above, copy `.env.example` to `.env`, and configure your connection and random secret. Then run the same Flask migration, seed, web, and simulator commands. The development server works on Windows; Gunicorn is for Linux/cloud deployment.
+Create and activate a virtual environment, install `requirements.lock.txt`, create the PostgreSQL role/databases as above, copy `.env.example` to `.env`, and configure your connection and random secret. Then run the same Flask migration, seed, web, simulator, and forecasting-worker commands. The development server works on Windows; Gunicorn is for Linux/cloud deployment.
 
 ## This Codex cloud instance
 
@@ -113,8 +120,9 @@ The setup helper preserves `.env`, existing data, source files, migrations, and 
 
 - Web application: port 5000; `.dormenergy-cloud/app.log`
 - Simulator: five-second interval; `.dormenergy-cloud/simulator.log`
+- Forecasting worker: ten-second queue polling and hourly prediction refresh; `.dormenergy-cloud/forecaster.log`
 - PostgreSQL: `.dormenergy-cloud/postgres.log`
-- Stop only helper-managed web/simulator processes with `bash scripts/stop-cloud.sh`. PostgreSQL remains running.
+- Stop only helper-managed web, simulator, and forecasting processes with `bash scripts/stop-cloud.sh`. PostgreSQL remains running.
 
 A filesystem snapshot can retain dependencies and database files, but live processes must restart. Use `start-cloud.sh` for each new cloud task. The repository was initially empty. The source is prepared for the `main` branch in `CZKDYN/THESIS-`; runtime secrets, local database files, and test artifacts are excluded from Git.
 
@@ -145,9 +153,15 @@ python -m pytest -q --junitxml=artifacts/backend-tests.xml
 
 On PowerShell, set `$env:TEST_DATABASE_URL` instead of `export`. The suite applies actual migrations and clears **only** the dedicated test database. Never point it at your development or production database. The cloud connection is `postgresql+psycopg://agent@/dormenergy_test?host=/workspace/.dormenergy-cloud/pgsocket`.
 
-For optional end-to-end browser testing, install Playwright in a separate tooling environment, install its Chromium browser, run the web server and simulator, set `DEMO_PASSWORD`, and execute `python scripts/browser_smoke.py`. Set `CHROMIUM_EXECUTABLE` to an existing Chromium binary if needed. This test approves a PHP 100 **sample** load and changes demo data; use an isolated simulation database. It saves screenshots and a machine-readable outcome in ignored `artifacts/`.
+For optional end-to-end browser testing, install Playwright in a separate tooling environment, install its Chromium browser, run the web server, simulator, and forecasting worker, set `DEMO_PASSWORD`, and execute `python scripts/browser_smoke.py`. Set `CHROMIUM_EXECUTABLE` to an existing Chromium binary if needed. This test retrains a synthetic model, approves a PHP 100 **sample** load, and archives/restores a demo unit; use an isolated simulation database. It saves screenshots and a machine-readable outcome in ignored `artifacts/`.
 
-Backend coverage includes authentication, CSRF, role isolation, scoped device tokens, financial arithmetic, duplicate approval/reading rejection, malformed requests, timestamp ordering, reset baselines, historical rate splitting, simulator transmissions, offline freshness, credit exhaustion, tenant assignment, protective trips, and concurrent approvals/transmissions. See [testing records](docs/testing.md). Software checks are not physical meter-accuracy or electrical-safety results.
+Backend coverage includes authorization, CSRF, decimal billing, ordered readings, unit archival, concurrent financial/device updates, genuine XGBoost training and JSON reload, chronological splits, missing-data/source handling, training jobs, scoped forecasts, and scheduled-rate credit projections. See [testing records](docs/testing.md). Software checks on synthetic data do not establish physical meter accuracy, real forecasting accuracy, or electrical safety.
+
+## Use XGBoost forecasting
+
+Sign in as an administrator, select one active simulated unit, open **Forecasting**, and click **Train XGBoost** if no model exists or you want to retrain. Initial demo jobs are queued automatically by the worker. Ten-second polling displays job progress, held-out MAE/RMSE/MAPE, baselines, comparison charts, and up to 24 upcoming full-hour predictions. Tenants can view their own unit's forecasts but cannot train models.
+
+Training needs at least 168 covered hourly observations for simulation or 720 for separately registered hardware. Stored readings are never relabeled between sources. Recent gaps can leave a trained model waiting for sufficiently covered hours. An unknown credit duration means the forecast cannot support an exhaustion estimate within its horizon. See [forecasting methods and commands](docs/forecasting.md).
 
 ## API and hardware integration
 
@@ -175,16 +189,17 @@ dormenergy/
   web.py              Login, logout, protected dashboard
   api.py              Authorized browser APIs and CSV exports
   hardware.py         Scoped monitoring-only hardware endpoints
-  commands.py         Seed, simulator, device-token CLI
+  commands.py         Seed, simulator, device-token and forecasting CLI
   services/
     billing.py        Decimal billing and atomic approval
     simulation.py     Explicit synthetic transmissions
+    forecasting.py    Hourly coverage, CPU XGBoost, evaluation and projections
   templates/          Login, dashboard, errors, SVG icons
   static/             Custom responsive CSS, JavaScript, local Chart.js
 migrations/           Alembic schema revisions
 tests/                Backend integration and concurrency checks
 scripts/              Cloud lifecycle and optional browser smoke test
-docs/                 API, assumptions, testing, deployment, ML plan
+docs/                 API, assumptions, testing, deployment, forecasting methods
 wsgi.py               Flask entrypoint
 ```
 
@@ -192,7 +207,7 @@ wsgi.py               Flask entrypoint
 
 - **Phase 2 refinements:** adviser-reviewed overdraft/disconnection policy, account threshold editing, complete tenant reassignment and password-reset lifecycle, longer-range paginated ledgers. The request/approval, rate, billing, notification, and transaction workflows already function.
 - **Phase 3:** ESP32/Raspberry Pi implementation, persistent gateway retry queues, heartbeat monitoring, command/acknowledgment protocol, and hardware reliability testing. The API accepts ordered replay with idempotent event IDs; the physical gateway queue is not yet implemented.
-- **Phase 4:** hourly preprocessing, time/lag features, chronological XGBoost training/evaluation, model artifacts, stored predictions, actual-versus-predicted charts, and forecast-horizon credit duration. No trained model, MAE, RMSE, MAPE, or expiry estimate is fabricated. See [forecasting plan](docs/forecasting.md).
+- **Phase 4 refinements:** adviser-reviewed real-data collection, representative seasonal coverage, rolling backtests, recursive multi-hour evaluation, uncertainty estimates, and measured credit-duration error. The training/forecasting prototype is implemented; synthetic results do not establish real-device accuracy. See [forecasting methods](docs/forecasting.md).
 - **Phase 5:** calibrated PZEM versus reference-meter trials, endurance tests, Wi-Fi failure/recovery experiments, deployment hardening, backups, and adviser-approved physical safety verification.
 
 See [research assumptions](docs/assumptions.md) and [deployment notes](docs/deployment.md). No thesis PDF was available in the workspace; this implementation follows the supplied master prompt and must be reconciled with Chapter 3 when the PDF is provided.

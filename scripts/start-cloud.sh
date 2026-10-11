@@ -27,6 +27,7 @@ start_process() {
   fi
 }
 start_process app .venv/bin/flask --app wsgi run --host 0.0.0.0 --port 5000
+start_process forecaster .venv/bin/flask --app wsgi forecast-worker --interval 10 --demo-models
 simulation_enabled=$(.venv/bin/python -c "from dormenergy import create_app; print('yes' if create_app().config['SIMULATION_MODE'] else 'no')")
 if [[ "$simulation_enabled" == yes ]]; then
   start_process simulator .venv/bin/flask --app wsgi simulate --interval 5

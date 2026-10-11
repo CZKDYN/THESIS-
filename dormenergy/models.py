@@ -141,6 +141,32 @@ class Transaction(db.Model):
     unit = db.relationship("Unit")
 
 
+class ForecastModel(db.Model):
+    __tablename__ = 'forecast_models'
+    id = db.Column(db.Integer, primary_key=True)
+    unit_id = db.Column(db.Integer, db.ForeignKey('dormitory_units.id'), nullable=False, index=True)
+    version = db.Column(db.String(64), nullable=False, unique=True)
+    source = db.Column(db.String(16), nullable=False)
+    model_json = db.Column(db.Text, nullable=False)
+    metadata_json = db.Column(db.JSON, nullable=False)
+    trained_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    __table_args__ = (CheckConstraint("source IN ('simulation', 'hardware')", name='valid_model_source'),)
+
+
+class ForecastJob(db.Model):
+    __tablename__ = 'forecast_jobs'
+    id = db.Column(db.Integer, primary_key=True)
+    unit_id = db.Column(db.Integer, db.ForeignKey('dormitory_units.id'), nullable=False, index=True)
+    requested_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    status = db.Column(db.String(16), nullable=False, default='pending')
+    message = db.Column(db.String(300), nullable=False, default='Waiting for the forecasting worker.')
+    model_version = db.Column(db.String(64))
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    started_at = db.Column(db.DateTime(timezone=True))
+    completed_at = db.Column(db.DateTime(timezone=True))
+    __table_args__ = (CheckConstraint("status IN ('pending', 'running', 'completed', 'failed')", name='valid_forecast_job_status'),)
+
+
 class Forecast(db.Model):
     __tablename__ = "forecasts"
     id = db.Column(db.Integer, primary_key=True)

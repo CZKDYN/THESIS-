@@ -9,12 +9,59 @@ from flask import current_app
 from sqlalchemy import select
 from werkzeug.security import generate_password_hash
 from .extensions import db
-from .models import Account, AuditLog, Device, LoadRequest, Notification, Rate, Transaction, Unit, User, utcnow
+from .models import Account, AuditLog, Device, ForecastJob, ForecastModel, LoadRequest, Notification, Rate, Transaction, Unit, User, utcnow
 from .services.billing import DomainError, ingest_reading, lock_unit
 from .services.simulation import simulation_step
+from .services.forecasting import forecast_worker_step, generate_forecasts, train_model
 
 
 def register_commands(app):
+    @app.cli.command('train-forecast')
+    @click.option('--unit-id', required=True, type=int)
+    def train_forecast(unit_id):
+        """Train/evaluate a per-unit XGBoost model and persist it in the database."""
+        import json
+        try:
+            model = train_model(unit_id)
+            try:
+                generate_forecasts(unit_id)
+            except DomainError as error:
+                db.session.rollback()
+                click.echo(error.message)
+            click.echo(json.dumps({'version': model.version, 'source': model.source,
+                                  'test': model.metadata_json['test']}, indent=2))
+        except DomainError as error:
+            db.session.rollback()
+            raise click.ClickException(error.message) from None
+
+    @app.cli.command('forecast-worker')
+    @click.option('--interval', default=10.0, type=click.FloatRange(min=5, max=300))
+    @click.option('--once', is_flag=True)
+    @click.option('--demo-models', is_flag=True, help='Queue initial models only for existing synthetic demo units.')
+    def forecast_worker(interval, once, demo_models):
+        """Process training jobs and refresh stored hourly predictions."""
+        if demo_models and current_app.config['SIMULATION_MODE']:
+            admin = db.session.scalar(select(User).where(User.role == 'admin', User.active.is_(True)).order_by(User.id).limit(1))
+            if admin:
+                for unit in db.session.scalars(select(Unit).where(Unit.is_demo.is_(True), Unit.archived_at.is_(None))).all():
+                    if unit.device and unit.device.source == 'simulation':
+                        lock_unit(unit.id)
+                        if not db.session.scalar(select(ForecastModel.id).where(ForecastModel.unit_id == unit.id).limit(1)) and not db.session.scalar(select(ForecastJob.id).where(ForecastJob.unit_id == unit.id).limit(1)):
+                            db.session.add(ForecastJob(unit_id=unit.id, requested_by=admin.id))
+                        db.session.commit()
+        click.echo('XGBoost forecasting worker running. Synthetic models are demonstration results only.')
+        while True:
+            try:
+                forecast_worker_step()
+            except Exception:
+                db.session.rollback()
+                current_app.logger.exception('Forecast worker step failed')
+                if once:
+                    raise
+            if once:
+                break
+            time.sleep(interval)
+
     @app.cli.command('seed-demo')
     @click.option('--password', envvar='DEMO_PASSWORD', help='Development-only password; use DEMO_PASSWORD or a prompt.')
     def seed_demo(password):

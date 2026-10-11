@@ -10,8 +10,9 @@ from flask_login import current_user, login_required
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from .extensions import db
-from .models import Account, AuditLog, Device, DeviceEvent, LoadRequest, Notification, Rate, Reading, Transaction, Unit, User, utcnow
+from .models import Account, AuditLog, Device, DeviceEvent, ForecastJob, LoadRequest, Notification, Rate, Reading, Transaction, Unit, User, utcnow
 from .services.billing import DomainError, aware, decimal_value, lock_unit, resolve_load
+from .services.forecasting import forecast_payload
 
 api = Blueprint('api', __name__)
 MANILA = ZoneInfo('Asia/Manila')
@@ -132,9 +133,10 @@ def snapshot():
                    requests=[load_json(r) for r in requests], transactions=[transaction_json(t) for t in transactions],
                    notifications=[dict(id=n.id, unit_id=n.unit_id, kind=n.kind, message=n.message, timestamp=iso(n.created_at)) for n in notifications],
                    events=[dict(device_id=e.device_id, kind=e.kind, state=e.state, message=e.message, timestamp=iso(e.created_at)) for e in events],
-                   forecast=dict(status='insufficient_data', message='Insufficient historical data',
-                                 detail='XGBoost training and validation are scheduled for Phase 4. No predictions or accuracy results are claimed.',
-                                 remaining_duration=None, horizon_hours=0))
+                   forecast=forecast_payload(units[0], now) if len(units) == 1 else
+                   dict(status='select_unit', message='Choose a dormitory unit',
+                        detail='Select a unit above to view its XGBoost model and forecast.',
+                        remaining_duration=None, horizon_hours=0, model=None, points=[], job=None))
 
 
 @api.post('/load-requests')
@@ -160,6 +162,37 @@ def create_load_request():
     db.session.add(AuditLog(actor_id=current_user.id, action='load_requested', detail=f'Unit {current_user.unit_id}, PHP {amount}'))
     db.session.commit()
     return jsonify(request=load_json(load), message='Your load request has been sent for review.'), 201
+
+
+@api.get('/forecast')
+@login_required
+def get_forecast():
+    units = scoped_units()
+    if len(units) != 1:
+        return jsonify(status='select_unit', message='Choose a dormitory unit',
+                       detail='Each meter has its own model and historical evaluation.',
+                       model=None, points=[], remaining_duration=None, horizon_hours=0, job=None)
+    return jsonify(forecast_payload(units[0]))
+
+
+@api.post('/units/<int:unit_id>/forecast/train')
+@admin_required
+def queue_forecast_training(unit_id):
+    unit = lock_unit(unit_id)
+    if not unit.device:
+        raise DomainError('Register a meter for this unit first.')
+    if unit.device.source == 'simulation' and not current_app.config['SIMULATION_MODE']:
+        raise DomainError('Synthetic model training requires simulation mode.', 409)
+    job = db.session.scalar(select(ForecastJob).where(
+        ForecastJob.unit_id == unit_id, ForecastJob.status.in_(['pending', 'running'])).limit(1))
+    if job:
+        return jsonify(message='Training is already queued or running.', job_id=job.id), 202
+    job = ForecastJob(unit_id=unit_id, requested_by=current_user.id)
+    db.session.add(job)
+    db.session.add(AuditLog(actor_id=current_user.id, action='forecast_requested',
+                           detail=f'XGBoost training requested for unit {unit_id}; {unit.device.source}.'))
+    db.session.commit()
+    return jsonify(message='XGBoost training queued. This page will show progress automatically.', job_id=job.id), 202
 
 
 @api.post('/load-requests/<int:request_id>/review')

@@ -1,7 +1,7 @@
 """Optional real-browser smoke test against a RUNNING SIMULATION development app.
 
-Install Playwright separately and set DEMO_PASSWORD. This creates a PHP 100
-sample load request and approves it; use only an isolated development database.
+Install Playwright separately and set DEMO_PASSWORD. This approves sample credit,
+retrains a synthetic model, and archives/restores a unit; use an isolated database.
 """
 import json
 import os
@@ -103,6 +103,28 @@ def main():
         unit_id = before['units'][0]['id']
         admin.locator('#unit-filter').select_option(str(unit_id))
         admin.wait_for_function("() => document.querySelectorAll('#unit-cards .unit-card').length===1")
+        admin.locator('.nav-link[data-view="forecast"]').click()
+        admin.wait_for_function("() => state.forecast.model && !document.querySelector('#train-forecast').disabled",timeout=60000)
+        model_before = admin_context.request.get(BASE+f'/api/forecast?unit_id={unit_id}').json()
+        assert model_before['synthetic'] and model_before['model']['test']['samples'] >= 24
+        assert len(model_before['points']) == 24
+        admin.get_by_role('button',name='Train XGBoost',exact=True).click()
+        admin.wait_for_function("version => state.forecast.model && state.forecast.model.version !== version && state.forecast.job.status === 'completed'",arg=model_before['model']['version'],timeout=60000)
+        assert admin.locator('#forecast-test-card').is_visible()
+        assert admin.locator('#forecast-future-card').is_visible()
+        assert 'SYNTHETIC DEMONSTRATION' in admin.locator('#forecast-source').inner_text()
+        admin.set_viewport_size({'width':1440,'height':1050})
+        admin.screenshot(path=ARTIFACTS/'forecast-desktop.png',full_page=True)
+        tenant.reload()
+        tenant.wait_for_selector('#unit-cards .unit-card')
+        tenant.get_by_role('button',name='Open navigation',exact=True).click()
+        tenant.locator('.nav-link[data-view="forecast"]').click()
+        assert tenant.locator('#train-forecast').count() == 0
+        assert tenant_context.request.get(BASE+'/api/forecast?unit_id=2').status == 403
+        assert tenant.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+        tenant.screenshot(path=ARTIFACTS/'forecast-mobile.png',full_page=True)
+        tenant.goto('about:blank')  # Stop dashboard polling while testing deliberate account revocation.
+        checks.append('Admin queues real XGBoost retraining; stored demo forecasts, held-out metrics/charts, tenant scope, and mobile forecast layout work')
         admin.locator('.nav-link[data-view="units"]').click()
         admin.locator(f'[data-remove="{unit_id}"]').click()
         admin.locator('#confirm-dialog').get_by_role('button',name='Cancel',exact=True).click()

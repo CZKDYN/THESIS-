@@ -1,13 +1,64 @@
-# Phase 4 forecasting plan — not yet implemented
+# XGBoost consumption forecasting
 
-The Phase 1 schema includes `forecasts` with unit, future hour, prediction, model version, source, and generation timestamp. The dashboard currently shows insufficient historical data. No XGBoost model has been trained or evaluated.
+The application trains a separate CPU XGBoost model for each unit using its stored meter readings. Model JSON, training metadata, evaluation results, jobs, and forecasts are stored in PostgreSQL, so replacing Render's filesystem does not discard them. Forecasting reads consumption history and projects costs; it does not alter billing, balances, or electrical state.
 
-A later forecasting service will read **incremental kWh**, not cumulative kWh as the prediction target. Build per-unit hourly buckets using UTC storage and explicitly defined local time features. Track coverage, reject invalid samples, keep simulated and hardware data separate, and avoid treating communication gaps as zero usage. Reconstruct cumulative-counter intervals with a documented allocation assumption; never interpolate using future observations across a train/test boundary.
+## Run the synthetic demonstration
 
-Use time-of-day, day-of-week, lagged kWh, and past-only rolling features. Split observations chronologically into training, validation, and held-out testing **before** fitting preprocessing. Tune only on the validation segment. Compare against persistence and seasonal baselines. Require sufficient complete history for the selected lag window and representative held-out days; do not choose an arbitrary accuracy threshold without adviser agreement.
+1. Deploy the latest commit and wait for the service to become healthy. The Render entrypoint applies migrations and starts one forecasting worker alongside Gunicorn and the simulator.
+2. Sign in as an administrator, select one active simulated unit, and open **Forecasting**. Initial demo jobs are queued automatically when an active seeded unit has neither a model nor a previous training job. They run sequentially, so allow the worker time to finish.
+3. Click **Train XGBoost** to request training or retry a failed job. The button queues a background job; ten-second dashboard polling reports progress. Existing models stay available while retraining runs.
+4. Inspect hourly predictions, held-out metrics, persistence/seasonal baselines, and observed-versus-predicted charts. Tenants can view only their assigned unit's results and cannot request training.
 
-Train `XGBRegressor` using `requirements-ml.txt`. Save the model and its training window, feature schema, unit/source, data coverage, and real evaluation outcomes. Report MAE and RMSE in kWh. Calculate MAPE only for nonzero actual values and report how many zero observations were excluded; also consider a separately specified aggregate metric for near-zero consumption. Never fabricate values.
+Every model and forecast retains its reading source. Seeded and simulator data are labeled **synthetic demonstration**, including their evaluation results. A good score on this scripted dataset is not evidence of accuracy on occupied dormitory units. Archived units are excluded from training and forecasting; restore a unit explicitly if it should participate again. Startup does not restore archived units or reset their balances.
 
-Store future hourly predictions with unique unit/hour/model identifiers. Display actual-versus-predicted series only when those predictions exist. Mark any demonstration model trained on an example dataset as a **synthetic demonstration**, not a validated real-device forecast.
+## Hourly target and coverage
 
-For duration, accumulate each predicted hour's projected cost at its applicable scheduled rate until it reaches the prepaid balance. Indicate an estimate, forecast horizon, and model/source. If no trained forecast exists, projected costs are zero, or the horizon cannot cover exhaustion, return “Cannot yet be determined reliably.” Do not extrapolate beyond the forecast horizon or guarantee an expiration time.
+The target is incremental hourly kWh, not the cumulative meter counter. Preprocessing reads at most 45 days of ordered, source-matched measurements for that unit. It distributes each accepted counter interval uniformly over elapsed time. That is an allocation assumption, not a recovered within-interval load curve.
+
+An interval contributes to an hour only when its ending measurement was observed by that hour's end. Cross-boundary intervals are excluded from earlier buckets to avoid using future information. An hourly target needs at least 95% observed coverage. Only fully closed hours are eligible. Intervals over 90 minutes, counter decreases, epoch changes, and missing observations are excluded. Live simulator pauses over two minutes are also excluded; they cannot create artificial zero-use hours. Values outside 0–25 kWh per hour are rejected, consistent with the meter API's maximum power range.
+
+Simulation needs at least **168 covered hourly observations**; hardware needs **720**, corresponding to seven and thirty fully covered days. These observations may span a longer window when gaps occur. Training also needs 120 eligible samples after a 24-hour feature warmup. These are software minimums, not research claims that seven or thirty days cover all occupancy patterns. A failed job reports the available covered hours; the application does not manufacture data to meet the minimum.
+
+## Features and evaluation
+
+Features include Asia/Manila hour sine/cosine, weekday/weekend, 1/2/24-hour consumption lags, past 6/24-hour averages, and observed-hour counts. A six-hour average needs four observations; a 24-hour average needs twenty. Missing values remain missing for XGBoost's native handling. Each sample requires the preceding hour and at least four of the previous six hours. Future targets never become that sample's features.
+
+Eligible samples are split chronologically: 60% training, 20% validation, and 20% held-out test. Two tree depths (2 and 4) are compared using validation MAE, with up to 160 boosting rounds and validation-only early stopping. The selected model is evaluated once on the test segment and saved without refitting on that test segment. Training uses one CPU thread and a fixed random seed. Persisted metadata records the feature schema, source, coverage, split boundaries/counts, selected parameters, and XGBoost version.
+
+The dashboard reports measured test MAE and RMSE in kWh and MAPE for nonzero actuals. It reports excluded zero targets; MAPE is unavailable if all actual targets are zero. Very small nonzero targets can make MAPE unstable. Persistence predicts the previous hour; the seasonal baseline predicts the same hour one day earlier. Seasonal metrics use only targets with that observation available and display their sample count. Charts retain the last 72 held-out points, while metrics cover the entire test segment.
+
+This is **next-hour chronological evaluation**. Actual observations from earlier test hours can become inputs for subsequent hours. It does not measure a 24-hour recursive forecast issued once at the start of the test window. Multi-hour backtests, uncertainty, duration-estimate error, representative real-data collection, and adviser-approved acceptance criteria remain necessary for research validation.
+
+## Predictions and estimated credit duration
+
+The worker checks for queued jobs every ten seconds and generates one forecast series per model and UTC issue hour when recent coverage is sufficient. It requires the last closed hour plus four covered hours in the previous six. Predictions are nonnegative and checked against the supported consumption range. The saved series contains the remaining current partial hour when needed and the next 24 full hours. Later predictions use earlier predictions recursively.
+
+The API displays only future full-hour points still within that series, so its remaining horizon decreases until a new series is issued. A trained model without usable recent data reports **waiting for readings**. An expired series is not presented as a current forecast. Saved historical evaluation remains available.
+
+Credit duration accumulates projected costs using the unit's current balance and applicable scheduled electricity rates. It assumes uniform consumption within each predicted hour, prorates the remaining current hour, and splits hours at rate changes. It returns an estimate only if credit would exhaust within the available continuous forecast. Missing coverage/rates, zero projected use, or credit lasting beyond that horizon returns **Cannot yet be determined reliably**. It never extrapolates beyond the series or promises a physical shutoff time.
+
+## Trusted-terminal commands
+
+Use the same activated virtual environment and database configuration as the application:
+
+```bash
+# Direct training and evaluation for one active unit:
+flask --app wsgi train-forecast --unit-id 1
+
+# Process queued jobs and refresh predictions continuously:
+flask --app wsgi forecast-worker --interval 10
+
+# Also queue initial models for active seeded simulation units:
+flask --app wsgi forecast-worker --interval 10 --demo-models
+
+# One worker cycle, useful for diagnosis:
+flask --app wsgi forecast-worker --once
+```
+
+The Render/cloud startup helpers already run one worker; avoid starting another unnecessarily. Duplicate pending/running requests for a unit reuse the existing job. Jobs left running for over fifteen minutes are marked interrupted so an administrator can retry them. Check `.dormenergy-cloud/forecaster.log` locally or the combined Render service logs if a job stalls.
+
+## Move to real measurements
+
+Register separate hardware units and provision their scoped device tokens as described in [the API contract](api.md). Collect genuine timestamped measurements, use `SIMULATION_MODE=false`, and run the forecasting worker without a simulator. Existing simulation artifacts remain labeled simulation and are not converted into hardware models. New synthetic training and prediction generation require simulation mode.
+
+Define data collection conditions, covered periods, train/validation/test windows, baselines, multi-hour backtests, and acceptance criteria before conducting real trials. Record the actual metrics even when XGBoost performs worse than a baseline. Thirty covered days merely satisfy this prototype's hardware training gate.

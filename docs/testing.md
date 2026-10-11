@@ -4,19 +4,19 @@ Development validation updated on 11 October 2026 (Asia/Manila). These are softw
 
 | Check | Observed outcome |
 | --- | --- |
-| PostgreSQL 17 backend integration suite | 22 passed, 0 failed, 0 skipped. Includes unit removal/restoration, record retention, account/device access, an empty dashboard, and row-lock concurrency for removal versus credits/readings. |
+| PostgreSQL 17 backend integration suite | 30 passed, 0 failed, 0 skipped. Includes billing/archival concurrency, genuine XGBoost training and JSON reload, chronological evaluation, future-endpoint leakage checks, missing coverage, source separation, job recovery, tenant forecast scope, and rate-aware credit projections. |
 | Portable temporary-SQLite suite | 14 passed, 0 failed, 2 skipped (Phase 1 run before the additional deployment URL test). The two concurrency tests require PostgreSQL and passed there. |
-| Real Chromium browser smoke | 9 checks passed: the original dashboard/credit/responsive checks plus removal confirmation/cancel, removal of a filtered unit, archived CSV history, tenant access revocation, restoration, and visible removal actions at 390px. No JavaScript/console errors. |
-| Migration upgrade and schema comparison | Unit-archiving revision applied to the existing seeded PostgreSQL deployment-test database; data and accounts were preserved. `flask db check` reports no new upgrade operations. Tests also apply both migrations to fresh databases. |
+| Real Chromium browser smoke | 10 checks passed, including administrator XGBoost retraining, completed job state, predictions/evaluation charts, tenant scope, and forecasting at 390px, alongside credit and archive/restore workflows. No JavaScript/console errors. A focused follow-up verified green completed-job styling and no mobile overflow after the final styling change. |
+| Migration upgrade and schema comparison | Forecast-model/job revision applied to the retained development database. Counts across its twelve existing tables, account balances, unit archival states, and user assignments were unchanged. `flask db check` reports no new upgrade operations. Backend tests and the isolated deployment apply all revisions to fresh databases. |
 | Dependency consistency | `pip check` reports no broken requirements. |
 | Setup repeatability | Cloud setup rerun preserves `.env` and database. Demo seed rerun reports existing units and preserves balances. |
-| Startup lifecycle | Web/simulator started through helpers; repeated startup reuses processes; helper-managed stop/restart validated. PostgreSQL remains independent. |
+| Startup lifecycle | Helper-managed web/simulator processes stopped, retained database upgraded, and web/simulator/forecasting worker restarted. Authenticated readiness and live readings checked. PostgreSQL remains independent. |
 
-Deployment preparation also adds a tested normalization of hosted PostgreSQL URL prefixes without dropping TLS options. The Render entrypoint was exercised locally against a fresh PostgreSQL database, with Gunicorn and one simulator; browser results for that run are recorded locally. This is not evidence of a live Render deployment or a completed GitHub-hosted CI run.
+Hosted PostgreSQL URL normalization preserves TLS options. The Render entrypoint was exercised locally against a fresh PostgreSQL database with one Gunicorn worker, one simulator, and one forecasting worker; initial demo models trained, and the browser requested successful retraining. This is not evidence that the latest revision has deployed on Render or passed GitHub-hosted CI. Hosted memory/load capacity has not been benchmarked.
 
-The unit-removal run is recorded in `artifacts/unit-removal-tests.xml`; original Phase 1 JUnit records are `artifacts/backend-tests.xml` and `artifacts/portable-tests.xml`. Current browser evidence is `artifacts/browser-smoke.json`, `artifacts/archived-units.png`, and `artifacts/unit-management-mobile.png` in that same ignored directory. Test outputs are local artifacts and are not committed by default. Run the documented commands to generate your own current-run records.
+Current backend evidence is `artifacts/forecasting-tests.xml`; retained-data checks are `artifacts/forecast-migration-preservation.json`. Browser evidence includes `artifacts/browser-smoke.json`, `artifacts/forecast-desktop.png`, `artifacts/forecast-mobile.png`, `artifacts/archived-units.png`, and `artifacts/unit-management-mobile.png`. Earlier Phase 1/unit-removal records remain separate. These local artifacts are ignored by Git; run the documented commands to generate current evidence.
 
-The browser script approves a PHP 100 development load and leaves an auditable sample transaction. This is not proof of a payment, calibrated meter performance, breaker safety, or XGBoost accuracy.
+The browser script approves a PHP 100 development load, retrains a synthetic model, and archives/restores a demo unit. Use an isolated simulation database. These checks verify implementation, not payment receipt, calibrated meter performance, breaker safety, or real-data XGBoost accuracy. The hardware-source training test also uses generated fixtures, not experimental measurements.
 
 ## Chapter 3 evaluation still required
 

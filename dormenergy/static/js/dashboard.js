@@ -13,6 +13,7 @@ const empty = (message, cols) => cols ? `<tr><td colspan="${cols}" class="empty-
 let state, view = 'overview', period = 'daily', overviewChart, detailChart, snapshotBusy = false, confirmCallback, toastTimeout;
 let requestReference = crypto.randomUUID();
 let archivedUnits = [];
+let forecastChart, forecastTestChart;
 const titles = {
   overview:['Dormitory overview','A clear view of your units, usage, and prepaid energy.'],
   units:['Dormitory units','Every unit, connected in one place.'],
@@ -60,6 +61,7 @@ function setView(next) {
   $('#mobile-menu').setAttribute('aria-expanded','false');
   if (next === 'consumption' && state) renderDetailChart();
   if (next === 'settings') loadRates();
+  if (next === 'forecast' && state) renderForecast(state.forecast);
 }
 function chartConfiguration(series, canvas, label) {
   const ctx = canvas.getContext('2d');
@@ -85,6 +87,53 @@ function renderDetailChart() {
   const series = state.charts[$('#detail-period').value];
   if (!detailChart) detailChart = new Chart($('#detail-chart'),chartConfiguration(series,$('#detail-chart'),'Actual consumption'));
   else { detailChart.data.labels=series.labels; detailChart.data.datasets[0].data=series.values; detailChart.update(); }
+}
+function renderForecast(data) {
+  $('#forecast-summary-status').textContent = data.status === 'available' ? `${num(data.points[0].kwh,3)} kWh · next full hour` : data.message;
+  $('#forecast-summary-copy').textContent = data.synthetic ? 'Synthetic demonstration · historical test results are not real-meter accuracy.' : data.detail;
+  $('#forecast-status').textContent = data.message;
+  $('#forecast-description').textContent = data.detail;
+  $('#forecast-source').textContent = data.source === 'simulation' ? 'SYNTHETIC DEMONSTRATION · Trained on simulated readings. These results do not establish real-meter accuracy.' : data.source === 'hardware' ? 'Hardware readings · Evaluate performance for your meter and study conditions.' : '';
+  const busy = data.job && ['pending','running'].includes(data.job.status);
+  const button = $('#train-forecast');
+  if (button) {button.disabled = busy || state.units.length !== 1;button.innerHTML = icon('bolt') + (busy?' Training in progress':' Train XGBoost');}
+  $('#forecast-job').hidden = !data.job;
+  $('#forecast-job').dataset.status = data.job?.status || '';
+  $('#forecast-job').textContent = data.job ? `${titleCase(data.job.status)} · ${data.job.message}` : '';
+  $('#forecast-next').textContent = data.points.length ? `${num(data.points[0].kwh,3)} kWh` : 'Not available';
+  $('#forecast-next-time').textContent = data.points.length ? date(data.points[0].timestamp) : '';
+  $('#forecast-duration').textContent = data.remaining_duration === null ? 'Cannot yet be determined' : data.remaining_duration === 0 ? 'Credit exhausted' : `${num(data.remaining_duration/3600,1)} hours`;
+  $('#forecast-horizon').textContent = data.horizon_hours ? `Within ${data.horizon_hours} upcoming hours · estimated` : 'Awaiting a covered forecast horizon';
+  const report = data.model;
+  $('#forecast-errors').textContent = report ? `${num(report.test.mae,4)} / ${num(report.test.rmse,4)} kWh` : 'Not evaluated';
+  $('#forecast-mape').textContent = report ? `MAPE ${report.test.mape === null?'not defined':num(report.test.mape,1)+'%'} · ${report.test.mape_zero_excluded} zero hours excluded` : '';
+  $('#forecast-model-note').textContent = report ? `${report.evaluation} · Trained ${date(report.trained_at)} · ${report.coverage.complete_hours} covered hours.` : 'Training uses earlier consumption. Historical evaluation uses later, held-out hours.';
+  $('#forecast-future-card').hidden = !data.points.length;
+  $('#forecast-test-card').hidden = !report;
+  if (view !== 'forecast') return;
+  if (data.points.length) {
+    const series = {labels:data.points.map(p=>date(p.timestamp)),values:data.points.map(p=>Number(p.kwh))};
+    $('#forecast-generated').textContent = `${data.synthetic?'Synthetic demo':'Hardware-data estimate'} · Generated ${date(data.generated_at)} · later hours use earlier predictions`;
+    if (!forecastChart) forecastChart = new Chart($('#forecast-chart'),chartConfiguration(series,$('#forecast-chart'),'Predicted kWh'));
+    else {forecastChart.data.labels=series.labels;forecastChart.data.datasets[0].data=series.values;forecastChart.update();}
+    forecastChart.resize();
+  }
+  if (report) {
+    const series = {labels:report.comparison.map(p=>date(p.timestamp)),values:report.comparison.map(p=>p.actual)};
+    $('#forecast-test-window').textContent = `${date(report.splits.test.start)} – ${date(report.splits.test.end)} · ${report.test.samples} held-out hours (showing ${report.comparison.length}) · ${data.synthetic?'synthetic observations':'hardware observations'}`;
+    const persistence = report.baselines.persistence;
+    const seasonal = report.baselines.seasonal_24h;
+    $('#forecast-baselines').textContent = `Baseline MAE: previous hour ${num(persistence.mae,4)} kWh (${persistence.samples} hours)${seasonal?`; same hour yesterday ${num(seasonal.mae,4)} kWh (${seasonal.samples} hours)`:''}. Lower is better. These metrics evaluate the next hour; recursive multi-hour error has not been evaluated.`;
+    if (!forecastTestChart) {
+      const config=chartConfiguration(series,$('#forecast-test-chart'),'Observed kWh');
+      config.data.datasets[0].fill=false;
+      config.data.datasets.push({label:'Held-out XGBoost prediction',data:report.comparison.map(p=>p.predicted),borderColor:'#d89b37',borderDash:[5,4],pointRadius:0,tension:.2,borderWidth:2});
+      config.options.plugins.legend={display:true,labels:{boxWidth:16,font:{size:10}}};
+      config.options.plugins.tooltip.callbacks.label=c=>`${c.dataset.label}: ${num(c.parsed.y,4)} kWh`;
+      forecastTestChart=new Chart($('#forecast-test-chart'),config);
+    } else {forecastTestChart.data.labels=series.labels;forecastTestChart.data.datasets[0].data=series.values;forecastTestChart.data.datasets[1].data=report.comparison.map(p=>p.predicted);forecastTestChart.update();}
+    forecastTestChart.resize();
+  }
 }
 function activityRow(t) {
   return `<div class="activity-row"><span class="activity-icon ${Number(t.amount)>0?'green':''}">${icon(Number(t.amount)>0?'wallet':'bolt')}</span><div class="activity-copy"><strong>${html(t.unit)} · ${t.kind==='consumption'?'Energy consumption':t.kind==='demo_credit'?'Sample opening credit':'Prepaid top-up'}</strong><small>${html(date(t.timestamp))}</small></div><div class="activity-amount ${Number(t.amount)>0?'positive':'negative'}">${Number(t.amount)>0?'+':'−'}${exactPesos(t.amount)}<small>${html(t.kind==='demo_credit'?'Simulation':'Recorded')}</small></div></div>`;
@@ -135,6 +184,7 @@ function render() {
   if (rateInput && !rateInput.value) rateInput.value = state.rate;
   renderOverviewChart();
   if (view==='consumption') renderDetailChart();
+  renderForecast(state.forecast);
 }
 function renderUnits() {
   const archived = $('#unit-status').value === 'archived';
@@ -216,6 +266,12 @@ $('#rate-form')?.addEventListener('submit',event=>{
 });
 $('#unit-filter')?.addEventListener('change',refresh);
 $('#unit-status')?.addEventListener('change',refresh);
+$('#train-forecast')?.addEventListener('click',async()=>{
+  if (state.units.length !== 1) return;
+  const button=$('#train-forecast');button.disabled=true;
+  try {const result=await api(`/api/units/${state.units[0].id}/forecast/train`,{});toast(result.message);await refresh();}
+  catch(error){toast(error.message,true);button.disabled=false;}
+});
 $('#detail-period').addEventListener('change',()=>{if(state)renderDetailChart();});
 $('#mobile-menu').addEventListener('click',()=>{const open=$('#sidebar').classList.toggle('is-open');$('#sidebar-scrim').hidden=!open;$('#mobile-menu').setAttribute('aria-expanded',String(open));});
 $('#sidebar-scrim').addEventListener('click',()=>{$('#sidebar').classList.remove('is-open');$('#sidebar-scrim').hidden=true;$('#mobile-menu').setAttribute('aria-expanded','false');});
