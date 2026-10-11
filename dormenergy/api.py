@@ -1,5 +1,6 @@
 import csv
 import io
+import secrets
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from functools import wraps
@@ -7,12 +8,14 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 from flask import Blueprint, Response, abort, current_app, jsonify, request
 from flask_login import current_user, login_required
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
+from werkzeug.security import generate_password_hash
 from .extensions import db
 from .models import Account, AuditLog, Device, DeviceEvent, ForecastJob, LoadRequest, Notification, Rate, Reading, Transaction, Unit, User, utcnow
 from .services.billing import DomainError, aware, decimal_value, lock_unit, resolve_load
 from .services.forecasting import forecast_payload
+from .services.accounts import change_password, identity, password_value
 
 api = Blueprint('api', __name__)
 MANILA = ZoneInfo('Asia/Manila')
@@ -35,8 +38,10 @@ def admin_required(function):
     return wrapped
 
 
-def scoped_units(include_archived=False):
+def scoped_units(include_archived=False, include_demo=False):
     query = select(Unit).order_by(Unit.id)
+    if not current_app.config['SIMULATION_MODE'] and not include_demo:
+        query = query.where(Unit.is_demo.is_(False))
     if not include_archived:
         query = query.where(Unit.archived_at.is_(None))
     if current_user.role != 'admin':
@@ -78,15 +83,34 @@ def unit_json(unit):
     recent = bool(device and device.last_seen and (utcnow() - aware(device.last_seen)).total_seconds() < 30)
     fresh = bool(latest and (utcnow() - aware(latest.timestamp)).total_seconds() < 90)
     online = recent and fresh and not unit.archived_at
-    tenant = db.session.scalar(select(User).where(User.unit_id == unit.id, User.role == 'tenant'))
+    tenant = current_tenant(unit.id)
     return dict(id=unit.id, name=unit.name, room=unit.room, archived_at=iso(unit.archived_at), tenant=tenant.name if tenant else 'Unassigned',
                 balance=str(account.balance) if account else '0', threshold=str(account.low_threshold) if account else '100',
                 power_status=unit.power_status if online else 'unknown', last_power_status=unit.power_status,
                 online=online, gateway_online=recent,
                 last_seen=iso(device.last_seen) if device else None, reading_at=iso(latest.timestamp) if latest else None,
-                device=device.identifier if device else 'Not registered', source=device.source if device else 'hardware',
+                tenant_id=tenant.id if tenant else None, tenant_email=tenant.email if tenant else None,
+                device=device.identifier if device else 'Not registered', source=device.source if device else 'hardware', token_provisioned=bool(device and device.token_hash),
                 voltage=str(latest.voltage) if latest else None, current=str(latest.current) if latest else None,
-                power=str(latest.power) if latest and online else None, energy=str(latest.energy) if latest else '0')
+                power=str(latest.power) if latest and online else None, energy=str(latest.energy) if latest else None)
+
+
+def current_tenant(unit_id):
+    return db.session.scalar(select(User).where(User.unit_id == unit_id, User.role == 'tenant', User.tenancy_ended_at.is_(None)))
+
+
+def hourly_totals(devices, since):
+    """Aggregate on the database, instead of loading months of ORM readings."""
+    if db.engine.dialect.name == 'postgresql':
+        hour = func.date_trunc('hour', func.timezone('Asia/Manila', Reading.timestamp))
+    else:
+        hour = func.strftime('%Y-%m-%d %H:00:00', Reading.timestamp, '+8 hours')
+    query = select(Reading.device_id, hour.label('hour'), func.sum(Reading.delta_kwh)).where(
+        Reading.device_id.in_(devices), Reading.timestamp >= since).group_by(Reading.device_id, hour)
+    for device_id, local_hour, energy in db.session.execute(query):
+        if isinstance(local_hour, str):
+            local_hour = datetime.fromisoformat(local_hour)
+        yield device_id, local_hour.replace(tzinfo=MANILA), energy
 
 
 @api.get('/snapshot')
@@ -96,7 +120,6 @@ def snapshot():
     ids = [u.id for u in units]
     devices = [u.device.id for u in units if u.device]
     now = utcnow()
-    rows = db.session.scalars(select(Reading).where(Reading.device_id.in_(devices), Reading.timestamp >= now - timedelta(days=30)).order_by(Reading.timestamp)).all()
     unitdata = [unit_json(u) for u in units]
     local_now = now.astimezone(MANILA)
     hours = [(local_now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=23-i)) for i in range(24)]
@@ -104,28 +127,39 @@ def snapshot():
     historical_days = [(local_now.date() - timedelta(days=29-i)) for i in range(30)]
     hourly, daily, historical, by_unit = {}, {}, {}, {device: Decimal('0') for device in devices}
     today = Decimal('0')
-    for row in rows:
-        local = aware(row.timestamp).astimezone(MANILA)
+    today_devices = set()
+    for device_id, local, energy in hourly_totals(devices, now-timedelta(days=30)):
         key = local.replace(minute=0, second=0, microsecond=0)
-        hourly[key] = hourly.get(key, Decimal('0')) + row.delta_kwh
-        daily[local.date()] = daily.get(local.date(), Decimal('0')) + row.delta_kwh
-        historical[local.date()] = historical.get(local.date(), Decimal('0')) + row.delta_kwh
+        hourly[key] = hourly.get(key, Decimal('0')) + energy
+        daily[local.date()] = daily.get(local.date(), Decimal('0')) + energy
+        historical[local.date()] = historical.get(local.date(), Decimal('0')) + energy
         if local.date() == local_now.date():
-            today += row.delta_kwh
-            by_unit[row.device_id] += row.delta_kwh
+            today_devices.add(device_id)
+            today += energy
+            by_unit[device_id] += energy
     for item, unit in zip(unitdata, units):
-        item['today_kwh'] = str(by_unit.get(unit.device.id, Decimal('0'))) if unit.device else '0'
-    rate = db.session.scalar(select(Rate).where(Rate.effective_at <= now).order_by(Rate.effective_at.desc()).limit(1))
-    requests = db.session.scalars(select(LoadRequest).where(LoadRequest.unit_id.in_(ids)).order_by(LoadRequest.created_at.desc()).limit(100)).all()
-    transactions = db.session.scalars(select(Transaction).where(Transaction.unit_id.in_(ids)).order_by(Transaction.created_at.desc(), Transaction.id.desc()).limit(40)).all()
-    notifications = db.session.scalars(select(Notification).where(Notification.unit_id.in_(ids)).order_by(Notification.created_at.desc()).limit(12)).all()
+        item['today_kwh'] = str(by_unit[unit.device.id]) if unit.device and unit.device.id in today_devices else None
+    rates = select(Rate).where(Rate.effective_at <= now)
+    if not current_app.config['SIMULATION_MODE']:
+        rates = rates.where(Rate.is_demo.is_(False))
+    rate = db.session.scalar(rates.order_by(Rate.effective_at.desc()).limit(1))
+    request_query = select(LoadRequest).where(LoadRequest.unit_id.in_(ids))
+    transaction_query = select(Transaction).where(Transaction.unit_id.in_(ids))
+    notification_query = select(Notification).where(Notification.unit_id.in_(ids))
+    if current_user.role == 'tenant':
+        request_query = request_query.where(LoadRequest.user_id == current_user.id)
+        transaction_query = transaction_query.where(Transaction.created_at >= current_user.created_at)
+        notification_query = notification_query.where(Notification.created_at >= current_user.created_at)
+    requests = db.session.scalars(request_query.order_by(LoadRequest.created_at.desc()).limit(100)).all()
+    transactions = db.session.scalars(transaction_query.order_by(Transaction.created_at.desc(), Transaction.id.desc()).limit(40)).all()
+    notifications = db.session.scalars(notification_query.order_by(Notification.created_at.desc()).limit(12)).all()
     events = db.session.scalars(select(DeviceEvent).where(DeviceEvent.device_id.in_(devices)).order_by(DeviceEvent.created_at.desc()).limit(20)).all()
     return jsonify(user=dict(name=current_user.name, role=current_user.role, unit_id=current_user.unit_id),
                    simulation=current_app.config['SIMULATION_MODE'], updated_at=iso(now), units=unitdata,
                    summary=dict(balance=str(sum((Decimal(u['balance']) for u in unitdata), Decimal('0'))),
-                                today_kwh=str(today), online=sum(u['online'] for u in unitdata),
+                                today_kwh=str(today) if today_devices else None, online=sum(u['online'] for u in unitdata),
                                 pending=sum(r.status == 'pending' for r in requests),
-                                power_w=str(sum((Decimal(u['power'] or '0') for u in unitdata), Decimal('0')))),
+                                power_w=str(sum((Decimal(u['power'] or '0') for u in unitdata), Decimal('0'))) if any(u['online'] for u in unitdata) else None),
                    rate=str(rate.php_per_kwh) if rate else None,
                    charts=dict(hourly=dict(labels=[h.strftime('%I %p').lstrip('0') for h in hours], values=[float(hourly[h]) if h in hourly else None for h in hours]),
                                daily=dict(labels=[d.strftime('%a') for d in days], values=[float(daily[d]) if d in daily else None for d in days]),
@@ -228,7 +262,10 @@ def update_rate():
 @api.get('/rates')
 @admin_required
 def rate_history():
-    rates = db.session.scalars(select(Rate).order_by(Rate.effective_at.desc()).limit(50)).all()
+    query = select(Rate)
+    if not current_app.config['SIMULATION_MODE']:
+        query = query.where(Rate.is_demo.is_(False))
+    rates = db.session.scalars(query.order_by(Rate.effective_at.desc()).limit(50)).all()
     return jsonify(rates=[dict(rate=str(r.php_per_kwh), effective_at=iso(r.effective_at)) for r in rates])
 
 
@@ -239,6 +276,13 @@ def register_unit():
     name, room, identifier = (payload.get(k, '') for k in ('name', 'room', 'device_id'))
     if any(not isinstance(x, str) or not 1 <= len(x.strip()) <= 80 for x in (name, room, identifier)):
         raise DomainError('Unit name, room, and device identifier are required (up to 80 characters).')
+    if not current_app.config['SIMULATION_MODE']:
+        legacy = db.session.scalar(select(Unit).where(Unit.name == name.strip(), Unit.is_demo.is_(True)).with_for_update())
+        if legacy:
+            original = legacy.name
+            legacy.name = f'{original[:60]} (demo {legacy.id})'
+            db.session.add(AuditLog(actor_id=current_user.id, action='demo_label_retired', detail=f'Demo unit {legacy.id} originally named {original}; label reserved for a newly registered physical unit.'))
+            db.session.flush()
     unit = Unit(name=name.strip(), room=room.strip())
     db.session.add(unit)
     db.session.flush()
@@ -246,17 +290,22 @@ def register_unit():
     db.session.add(Device(identifier=identifier.strip(), unit_id=unit.id, source='hardware'))
     db.session.add(AuditLog(actor_id=current_user.id, action='unit_registered', detail=f'Unit {unit.id} registered. Device monitoring only.'))
     db.session.commit()
-    return jsonify(message='Unit registered. Provision device authentication using the documented CLI.', id=unit.id), 201
+    return jsonify(message='Unit registered. Assign a tenant and generate its device token in Device monitoring.', id=unit.id), 201
 
 
 @api.get('/units')
 @admin_required
 def list_units():
     status = request.args.get('status', 'active')
-    if status not in ('active', 'archived'):
-        raise DomainError('Choose active or archived units.')
+    if status not in ('active', 'archived', 'demo'):
+        raise DomainError('Choose active units, archived units, or demonstration history.')
     query = select(Unit).order_by(Unit.id)
-    query = query.where(Unit.archived_at.is_(None) if status == 'active' else Unit.archived_at.is_not(None))
+    if status == 'demo':
+        query = query.where(Unit.is_demo.is_(True))
+    else:
+        query = query.where(Unit.archived_at.is_(None) if status == 'active' else Unit.archived_at.is_not(None))
+        if not current_app.config['SIMULATION_MODE']:
+            query = query.where(Unit.is_demo.is_(False))
     return jsonify(units=[unit_json(unit) for unit in db.session.scalars(query).all()])
 
 
@@ -269,7 +318,7 @@ def archive_unit(unit_id):
     for request_id in pending:
         resolve_load(request_id, 'rejected', current_user)
     unit.archived_at = utcnow()
-    tenant = db.session.scalar(select(User).where(User.unit_id == unit.id, User.role == 'tenant'))
+    tenant = current_tenant(unit.id)
     if tenant:
         tenant.active = False
     db.session.add(AuditLog(actor_id=current_user.id, action='unit_archived',
@@ -285,7 +334,7 @@ def restore_unit(unit_id):
     if not unit.archived_at:
         raise DomainError('This unit is already active.', 409)
     unit.archived_at = None
-    tenant = db.session.scalar(select(User).where(User.unit_id == unit.id, User.role == 'tenant'))
+    tenant = current_tenant(unit.id)
     if tenant:
         tenant.active = True
     db.session.add(AuditLog(actor_id=current_user.id, action='unit_restored',
@@ -299,14 +348,11 @@ def restore_unit(unit_id):
 def assign_tenant(unit_id):
     lock_unit(unit_id)
     payload = json_payload()
-    name, email, password = (payload.get(k, '') for k in ('name', 'email', 'password'))
-    if not isinstance(name, str) or not 1 <= len(name.strip()) <= 100 or not isinstance(email, str) or '@' not in email or len(email) > 254:
-        raise DomainError('A tenant name and valid email are required.')
-    if not isinstance(password, str) or not 12 <= len(password) <= 128:
-        raise DomainError('Use a password of 12–128 characters.')
-    if db.session.scalar(select(User.id).where(User.unit_id == unit_id)):
+    name, email = identity(payload.get('name'), payload.get('email'))
+    password = password_value(payload.get('password'))
+    if current_tenant(unit_id):
         raise DomainError('This unit already has an assigned tenant.', 409)
-    user = User(name=name.strip(), email=email.strip().lower(), role='tenant', unit_id=unit_id)
+    user = User(name=name, email=email, role='tenant', unit_id=unit_id, must_change_password=True)
     user.set_password(password)
     db.session.add(user)
     db.session.add(AuditLog(actor_id=current_user.id, action='tenant_assigned', detail=f'Tenant assigned to unit {unit_id}'))
@@ -314,12 +360,86 @@ def assign_tenant(unit_id):
     return jsonify(message='Tenant account created and assigned.'), 201
 
 
+@api.post('/units/<int:unit_id>/edit')
+@admin_required
+def edit_unit(unit_id):
+    unit = lock_unit(unit_id)
+    payload = json_payload()
+    name, room = payload.get('name'), payload.get('room')
+    if any(not isinstance(value, str) or not 1 <= len(value.strip()) <= 80 for value in (name, room)):
+        raise DomainError('Enter a unit name and room of 1–80 characters.')
+    threshold = decimal_value(payload.get('threshold'), 'threshold', Decimal('100000'))
+    if threshold != threshold.quantize(Decimal('0.01')):
+        raise DomainError('Use at most two decimal places for the low-credit threshold.')
+    unit.name, unit.room, unit.account.low_threshold = name.strip(), room.strip(), threshold
+    db.session.add(AuditLog(actor_id=current_user.id, action='unit_updated', detail=f'Unit {unit.id} details and low-credit threshold updated.'))
+    db.session.commit()
+    return jsonify(message='Unit details saved. Existing balance and history are preserved.')
+
+
+@api.post('/units/<int:unit_id>/tenant/password')
+@admin_required
+def reset_tenant_password(unit_id):
+    lock_unit(unit_id)
+    tenant = current_tenant(unit_id)
+    if not tenant:
+        raise DomainError('Assign a tenant first.', 409)
+    tenant = db.session.scalar(select(User).where(User.id == tenant.id).with_for_update().execution_options(populate_existing=True))
+    change_password(tenant, json_payload().get('password'), temporary=True)
+    db.session.add(AuditLog(actor_id=current_user.id, action='tenant_password_reset', detail=f'Tenant {tenant.id} password reset; sessions revoked.'))
+    db.session.commit()
+    return jsonify(message='Temporary password set. Share it securely; the tenant must change it at sign-in.')
+
+
+@api.post('/units/<int:unit_id>/tenant/end')
+@admin_required
+def end_tenancy(unit_id):
+    unit = lock_unit(unit_id)
+    tenant = current_tenant(unit_id)
+    if not tenant:
+        raise DomainError('This unit has no current tenant.', 409)
+    pending = db.session.scalars(select(LoadRequest.id).where(LoadRequest.user_id == tenant.id, LoadRequest.status == 'pending').order_by(LoadRequest.id)).all()
+    for request_id in pending:
+        resolve_load(request_id, 'rejected', current_user)
+    tenant.active, tenant.tenancy_ended_at = False, utcnow()
+    tenant.session_version += 1
+    db.session.add(AuditLog(actor_id=current_user.id, action='tenancy_ended', detail=f'Tenant {tenant.id} moved out of unit {unit.id}; records and unit balance retained.'))
+    db.session.commit()
+    return jsonify(message='Tenant access ended. Records and the unit balance are retained; you may assign the next tenant.')
+
+
+@api.post('/units/<int:unit_id>/device-token')
+@admin_required
+def device_token(unit_id):
+    unit = lock_unit(unit_id)
+    if not unit.device or unit.device.source != 'hardware':
+        raise DomainError('Choose a registered hardware meter.', 409)
+    payload = json_payload()
+    actor = db.session.scalar(select(User).where(User.id == current_user.id).with_for_update().execution_options(populate_existing=True))
+    password = payload.get('current_password', '')
+    if not isinstance(password, str) or len(password)>128 or not actor.check_password(password):
+        raise DomainError('Your current password is incorrect.', 403)
+    action = payload.get('action', 'generate')
+    if action not in ('generate', 'revoke'):
+        raise DomainError('Choose generate or revoke.')
+    token = secrets.token_urlsafe(40) if action == 'generate' else None
+    unit.device.token_hash = generate_password_hash(token) if token else None
+    db.session.add(AuditLog(actor_id=current_user.id, action='device_token_'+action, detail=f'Device {unit.device.id} credential changed; previous token invalidated.'))
+    db.session.commit()
+    return jsonify(message='Store this token securely on your gateway. It is shown only once.' if token else 'Device token revoked. Future transmissions need a new token.',
+                   token=token, device_id=unit.device.identifier, unit_id=unit.id, ingestion_path='/api/iot/readings')
+
+
 @api.get('/transactions/export')
 @login_required
 def export_transactions():
     include_archived = current_user.role == 'admin' and request.args.get('include_archived') == 'true'
-    ids = [u.id for u in scoped_units(include_archived=include_archived)]
-    rows = db.session.scalars(select(Transaction).where(Transaction.unit_id.in_(ids)).order_by(Transaction.created_at.desc()).limit(10000)).all()
+    include_demo = current_user.role == 'admin' and request.args.get('include_demo') == 'true'
+    ids = [u.id for u in scoped_units(include_archived=include_archived, include_demo=include_demo)]
+    query = select(Transaction).where(Transaction.unit_id.in_(ids))
+    if current_user.role == 'tenant':
+        query = query.where(Transaction.created_at >= current_user.created_at)
+    rows = db.session.scalars(query.order_by(Transaction.created_at.desc()).limit(10000)).all()
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(['transaction_id', 'unit', 'timestamp_utc', 'kind', 'amount_php', 'balance_after_php', 'description'])

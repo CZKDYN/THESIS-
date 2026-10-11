@@ -4,7 +4,11 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cloud_state=/workspace/.dormenergy-cloud
 pg_bin="$cloud_state/postgres/usr/lib/postgresql/17/bin"
 cd "$project_root"
+export SIMULATION_MODE=false
 mkdir -p "$cloud_state"
+if [[ -f "$cloud_state/simulator.pid" ]]; then
+  bash scripts/stop-cloud.sh
+fi
 if ! "$pg_bin/pg_ctl" -D "$cloud_state/pgdata" status >/dev/null 2>&1; then
   "$pg_bin/pg_ctl" -D "$cloud_state/pgdata" -l "$cloud_state/postgres.log" -o "-k $cloud_state/pgsocket -p 5432 -h 127.0.0.1" start
 fi
@@ -27,10 +31,6 @@ start_process() {
   fi
 }
 start_process app .venv/bin/flask --app wsgi run --host 0.0.0.0 --port 5000
-start_process forecaster .venv/bin/flask --app wsgi forecast-worker --interval 10 --demo-models
-simulation_enabled=$(.venv/bin/python -c "from dormenergy import create_app; print('yes' if create_app().config['SIMULATION_MODE'] else 'no')")
-if [[ "$simulation_enabled" == yes ]]; then
-  start_process simulator .venv/bin/flask --app wsgi simulate --interval 5
-fi
+start_process forecaster .venv/bin/flask --app wsgi forecast-worker --interval 10
 curl --fail --silent --show-error http://127.0.0.1:5000/health
 printf '\n%s\n' 'Development services started. Validate an authenticated dashboard; health alone is not a functional check.'

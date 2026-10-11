@@ -1,6 +1,7 @@
 """The single authoritative path for meter ingestion and monetary updates."""
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from flask import current_app
 from sqlalchemy import select
 from ..extensions import db
 from ..models import Account, AuditLog, Device, DeviceEvent, LoadRequest, Notification, Rate, Reading, Transaction, Unit, utcnow
@@ -19,6 +20,8 @@ def lock_unit(unit_id, allow_archived=False):
                              .execution_options(populate_existing=True))
     if not unit:
         raise DomainError('Unit not found.', 404)
+    if not current_app.config['SIMULATION_MODE'] and unit.is_demo:
+        raise DomainError('This is retained demonstration history. Register a hardware unit for real use.', 409)
     if unit.archived_at and not allow_archived:
         raise DomainError('This unit has been removed. Restore it before making changes.', 409)
     return unit
@@ -55,10 +58,13 @@ def parse_timestamp(value):
 
 def charge_for_interval(delta, start, end):
     """Prorate interval energy across rate changes; no finer usage is inferred."""
-    first = db.session.scalar(select(Rate).where(Rate.effective_at <= start).order_by(Rate.effective_at.desc()).limit(1))
+    rates = select(Rate)
+    if not current_app.config['SIMULATION_MODE']:
+        rates = rates.where(Rate.is_demo.is_(False))
+    first = db.session.scalar(rates.where(Rate.effective_at <= start).order_by(Rate.effective_at.desc()).limit(1))
     if first is None:
         raise DomainError('No electricity rate covers this reading interval.')
-    changes = db.session.scalars(select(Rate).where(Rate.effective_at > start, Rate.effective_at <= end).order_by(Rate.effective_at)).all()
+    changes = db.session.scalars(rates.where(Rate.effective_at > start, Rate.effective_at <= end).order_by(Rate.effective_at)).all()
     if end == start:
         return Decimal('0'), first
     duration = Decimal(str((end - start).total_seconds()))

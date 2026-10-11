@@ -2,14 +2,14 @@
 
 The application trains a separate CPU XGBoost model for each unit using its stored meter readings. Model JSON, training metadata, evaluation results, jobs, and forecasts are stored in PostgreSQL, so replacing Render's filesystem does not discard them. Forecasting reads consumption history and projects costs; it does not alter billing, balances, or electrical state.
 
-## Run the synthetic demonstration
+## Train from actual readings
 
-1. Deploy the latest commit and wait for the service to become healthy. The Render entrypoint applies migrations and starts one forecasting worker alongside Gunicorn and the simulator.
-2. Sign in as an administrator, select one active simulated unit, and open **Forecasting**. Initial demo jobs are queued automatically when an active seeded unit has neither a model nor a previous training job. They run sequentially, so allow the worker time to finish.
-3. Click **Train XGBoost** to request training or retry a failed job. The button queues a background job; ten-second dashboard polling reports progress. Existing models stay available while retraining runs.
+1. Deploy the latest commit. The entrypoint applies migrations and starts one forecasting worker alongside Gunicorn; no simulator or demo training starts.
+2. Register a physical unit, configure its actual electricity rate, provision the meter token, and collect at least 720 covered hourly observations for that meter.
+3. Sign in as an administrator, select the unit, open **Forecasting**, and click **Train XGBoost**. The button queues a background job; ten-second dashboard polling reports progress. Existing models stay available while retraining runs.
 4. Inspect hourly predictions, held-out metrics, persistence/seasonal baselines, and observed-versus-predicted charts. Tenants can view only their assigned unit's results and cannot request training.
 
-Every model and forecast retains its reading source. Seeded and simulator data are labeled **synthetic demonstration**, including their evaluation results. A good score on this scripted dataset is not evidence of accuracy on occupied dormitory units. Archived units are excluded from training and forecasting; restore a unit explicitly if it should participate again. Startup does not restore archived units or reset their balances.
+Every model and forecast retains its reading source. Previous synthetic models and readings are retained outside the real workspace, never converted into hardware models. They do not establish accuracy on occupied dormitory units. Archived real units are excluded from training/forecasting until explicitly restored. Startup does not restore archived units or reset balances.
 
 ## Hourly target and coverage
 
@@ -17,7 +17,7 @@ The target is incremental hourly kWh, not the cumulative meter counter. Preproce
 
 An interval contributes to an hour only when its ending measurement was observed by that hour's end. Cross-boundary intervals are excluded from earlier buckets to avoid using future information. An hourly target needs at least 95% observed coverage. Only fully closed hours are eligible. Intervals over 90 minutes, counter decreases, epoch changes, and missing observations are excluded. Live simulator pauses over two minutes are also excluded; they cannot create artificial zero-use hours. Values outside 0–25 kWh per hour are rejected, consistent with the meter API's maximum power range.
 
-Simulation needs at least **168 covered hourly observations**; hardware needs **720**, corresponding to seven and thirty fully covered days. These observations may span a longer window when gaps occur. Training also needs 120 eligible samples after a 24-hour feature warmup. These are software minimums, not research claims that seven or thirty days cover all occupancy patterns. A failed job reports the available covered hours; the application does not manufacture data to meet the minimum.
+Hardware needs **720 covered hourly observations**, corresponding to thirty fully covered days. These observations may span a longer window when gaps occur. Training also needs 120 eligible samples after a 24-hour feature warmup. These are software minimums, not research claims that thirty days cover all occupancy patterns. A failed job reports available covered hours; the application does not manufacture data to meet the minimum. Isolated regression fixtures retain a separate 168-hour synthetic gate; it is not used by normal real-mode startup.
 
 ## Features and evaluation
 
@@ -47,9 +47,6 @@ flask --app wsgi train-forecast --unit-id 1
 
 # Process queued jobs and refresh predictions continuously:
 flask --app wsgi forecast-worker --interval 10
-
-# Also queue initial models for active seeded simulation units:
-flask --app wsgi forecast-worker --interval 10 --demo-models
 
 # One worker cycle, useful for diagnosis:
 flask --app wsgi forecast-worker --once

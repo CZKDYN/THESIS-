@@ -78,7 +78,7 @@ def register_commands(app):
             raise click.ClickException('Use a password of 12–128 characters.')
         now = utcnow()
         start = now.replace(minute=0, second=0, microsecond=0) - timedelta(days=7)
-        db.session.add(Rate(php_per_kwh=Decimal('12.85'), effective_at=start - timedelta(days=1)))
+        db.session.add(Rate(php_per_kwh=Decimal('12.85'), effective_at=start - timedelta(days=1), is_demo=True))
         admin = User(name='Alex Rivera', email='admin@dormenergy.test', role='admin')
         admin.set_password(password)
         db.session.add(admin)

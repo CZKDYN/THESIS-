@@ -51,10 +51,9 @@ if [[ ! -f .env ]]; then
 import getpass, secrets
 from pathlib import Path
 path=Path('.env')
-path.write_text('SECRET_KEY='+secrets.token_hex(32)+'\nDATABASE_URL=postgresql+psycopg://'+getpass.getuser()+'@/dormenergy?host=/workspace/.dormenergy-cloud/pgsocket\nSIMULATION_MODE=true\nSESSION_COOKIE_SECURE=false\n')
+path.write_text('SECRET_KEY='+secrets.token_hex(32)+'\nDATABASE_URL=postgresql+psycopg://'+getpass.getuser()+'@/dormenergy?host=/workspace/.dormenergy-cloud/pgsocket\nSIMULATION_MODE=false\nSESSION_COOKIE_SECURE=false\n')
 path.chmod(0o600)
 PY
 fi
 .venv/bin/flask --app wsgi db upgrade
-if [[ -n "${DEMO_PASSWORD:-}" ]]; then .venv/bin/flask --app wsgi seed-demo; fi
 printf '%s\n' 'PostgreSQL and dependencies prepared. Existing data and .env preserved.'

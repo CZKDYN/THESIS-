@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% block bodyclass %}account-page{% endblock %}
+{% block body %}
+<main class="account-layout">
+  <a class="brand" href="{{ url_for('web.login') }}"><span class="brand-icon">{{ icon('bolt') }}</span><span>Dorm<span class="brand-accent">Energy</span></span></a>
+  <article class="card account-card">
+    <div class="card-heading"><div><h1>{{ 'Set up your administrator account' if kind == 'setup' else 'Change your password' if kind == 'password' else 'Your account' }}</h1><p>{{ 'Create the owner account for this installation.' if kind == 'setup' else 'Choose your own password before using the workspace.' if current_user.must_change_password else 'Manage your sign-in details.' }}</p></div></div>
+    {% if unavailable %}<p class="account-notice">Administrator setup needs an ADMIN_SETUP_TOKEN in your hosting environment. Set it securely in Render and redeploy, then return here.</p>{% else %}
+    <form method="post" class="panel-form account-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {% for category, message in get_flashed_messages(with_categories=true) %}<div class="form-alert {{ 'success-alert' if category == 'success' else '' }}" role="alert">{{ message }}</div>{% endfor %}
+      {% if kind == 'setup' %}<label for="setup-token">Administrator setup token</label><input id="setup-token" name="setup_token" type="password" required maxlength="512" autocomplete="off"><p class="field-help">Use the secret from your Render environment. Setup closes after the first administrator is created.</p>{% endif %}
+      {% if kind != 'password' %}<label for="account-name">Full name</label><input id="account-name" name="name" required maxlength="100" autocomplete="name" value="{{ current_user.name if kind == 'profile' else '' }}"><label for="account-email">Email address</label><input id="account-email" name="email" type="email" required maxlength="254" autocomplete="email" value="{{ current_user.email if kind == 'profile' else '' }}">{% endif %}
+      {% if kind != 'setup' %}<label for="current-password">Current password</label><input id="current-password" name="current_password" type="password" required maxlength="128" autocomplete="current-password">{% endif %}
+      {% if kind != 'profile' %}<label for="new-password">New password</label><input id="new-password" name="new_password" type="password" required minlength="12" maxlength="128" autocomplete="new-password"><label for="confirm-password">Confirm new password</label><input id="confirm-password" name="confirm_password" type="password" required minlength="12" maxlength="128" autocomplete="new-password"><p class="field-help">Use 12–128 characters.</p>{% endif %}
+      <button class="btn btn-primary" type="submit">{{ 'Create administrator' if kind == 'setup' else 'Change password' if kind == 'password' else 'Save account' }}</button>
+    </form>{% endif %}
+    {% if kind != 'setup' %}<div class="account-links"><a class="text-button" href="{{ url_for('web.dashboard') }}">Back to workspace</a>{% if kind == 'profile' %}<a class="text-button" href="{{ url_for('web.password') }}">Change password</a>{% endif %}<form method="post" action="{{ url_for('web.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="text-button">Sign out</button></form></div>{% endif %}
+  </article>
+</main>
+{% endblock %}

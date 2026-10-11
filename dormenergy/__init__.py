@@ -2,7 +2,7 @@ import logging
 import os
 from datetime import timedelta
 from pathlib import Path
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 from flask_wtf.csrf import CSRFError
 from sqlalchemy import text
 from dotenv import load_dotenv
@@ -32,6 +32,7 @@ def create_app(test_config=None):
         PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
         MAX_CONTENT_LENGTH=32 * 1024,
         LOW_BALANCE_THRESHOLD=os.getenv('LOW_BALANCE_THRESHOLD', '100.00'),
+        ADMIN_SETUP_TOKEN=os.getenv('ADMIN_SETUP_TOKEN', ''),
     )
     if test_config:
         app.config.update(test_config)
@@ -50,7 +51,7 @@ def create_app(test_config=None):
     def load_user(user_id):
         try:
             user = db.session.get(User, int(user_id))
-            if not user or not user.active or (user.role == 'tenant' and user.unit.archived_at):
+            if not user or not user.active or session.get('auth_version') != user.session_version or (user.role == 'tenant' and (user.unit.archived_at or user.tenancy_ended_at or (not app.config['SIMULATION_MODE'] and user.unit.is_demo))):
                 return None
             return user
         except (ValueError, TypeError):
@@ -72,6 +73,14 @@ def create_app(test_config=None):
     app.register_blueprint(hardware, url_prefix='/api/iot')
     csrf.exempt(hardware)  # Uses a scoped bearer token, never cookie authentication.
     register_commands(app)
+
+    @app.before_request
+    def require_password_change():
+        from flask_login import current_user
+        if current_user.is_authenticated and current_user.must_change_password and request.endpoint not in ('web.password', 'web.logout', 'static'):
+            if request.path.startswith('/api/'):
+                return jsonify(error='Change your temporary password before using your account.', password_change_required=True), 403
+            return redirect(url_for('web.password'))
 
     @app.get('/health')
     def health():
@@ -105,7 +114,7 @@ def create_app(test_config=None):
         response.headers['X-Frame-Options'] = 'DENY'
         response.headers['Referrer-Policy'] = 'same-origin'
         response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; form-action 'self'"
-        if request.path.startswith('/api/') or request.path == '/dashboard':
+        if request.path.startswith('/api/') or request.path in ('/dashboard', '/login', '/setup', '/account', '/account/password'):
             response.headers['Cache-Control'] = 'no-store'
         return response
 

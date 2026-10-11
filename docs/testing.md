@@ -1,25 +1,25 @@
 # Software validation record
 
-Development validation updated on 11 October 2026 (Asia/Manila). These are software checks on synthetic data, not physical hardware experiments or thesis accuracy results.
+Validated on 12 October 2026 (Asia/Manila). These are software checks in isolated local databases, not physical-meter tests or research accuracy claims.
 
-| Check | Observed outcome |
+| Check | Result |
 | --- | --- |
-| PostgreSQL 17 backend integration suite | 30 passed, 0 failed, 0 skipped. Includes billing/archival concurrency, genuine XGBoost training and JSON reload, chronological evaluation, future-endpoint leakage checks, missing coverage, source separation, job recovery, tenant forecast scope, and rate-aware credit projections. |
-| Portable temporary-SQLite suite | 14 passed, 0 failed, 2 skipped (Phase 1 run before the additional deployment URL test). The two concurrency tests require PostgreSQL and passed there. |
-| Real Chromium browser smoke | 10 checks passed, including administrator XGBoost retraining, completed job state, predictions/evaluation charts, tenant scope, and forecasting at 390px, alongside credit and archive/restore workflows. No JavaScript/console errors. A focused follow-up verified green completed-job styling and no mobile overflow after the final styling change. |
-| Migration upgrade and schema comparison | Forecast-model/job revision applied to the retained development database. Counts across its twelve existing tables, account balances, unit archival states, and user assignments were unchanged. `flask db check` reports no new upgrade operations. Backend tests and the isolated deployment apply all revisions to fresh databases. |
-| Dependency consistency | `pip check` reports no broken requirements. |
-| Setup repeatability | Cloud setup rerun preserves `.env` and database. Demo seed rerun reports existing units and preserves balances. |
-| Startup lifecycle | Helper-managed web/simulator processes stopped, retained database upgraded, and web/simulator/forecasting worker restarted. Authenticated readiness and live readings checked. PostgreSQL remains independent. |
+| PostgreSQL 17 integration suite | 38 passed, 0 failed, 0 skipped. Includes account setup, forced password changes, session revocation, tenant turnover, source/measurement isolation, actual-rate requirements, device credentials, billing/archival concurrency, and genuine XGBoost training/evaluation/JSON reload. |
+| Portable SQLite suite | 34 passed, 0 failed, 4 skipped. The four row-lock concurrency cases require PostgreSQL and passed there. The new account-lifecycle migration and hourly aggregation also ran on SQLite. |
+| Real-mode Chromium workflows | 10 checks passed, 0 console/JavaScript errors. Covers initial owner setup, empty workspace, all navigation, unit editing, tenant creation/change/reset/turnover, tariff and credit workflows, one-time credentials, generated API test readings and billing, exports, archive/restore, insufficient-history forecasting, profile editing, and 390px layouts. |
+| Retained-database migration | Counts across thirteen retained tables, account balances, user identities/assignments, and historical rate amounts unchanged. Demo units archived and demo tenant access disabled; pending demo requests rejected by the versioned migration. No records were deleted or relabeled as hardware data. |
+| Schema comparison | Actual migration applied; flask db check reports no additional upgrade operations. |
+| Dependency/syntax checks | pip check, Python compilation, shell syntax, JavaScript syntax, and Git whitespace checks passed. |
+| Deployment entrypoint | Started locally with a legacy SIMULATION_MODE=true supplied deliberately; /health reported hardware mode. One Gunicorn worker and one forecasting worker ran, with no simulator or seed step. |
 
-Hosted PostgreSQL URL normalization preserves TLS options. The Render entrypoint was exercised locally against a fresh PostgreSQL database with one Gunicorn worker, one simulator, and one forecasting worker; initial demo models trained, and the browser requested successful retraining. This is not evidence that the latest revision has deployed on Render or passed GitHub-hosted CI. Hosted memory/load capacity has not been benchmarked.
+Current artifacts are artifacts/real-mode-tests.xml, artifacts/real-mode-portable-tests.xml, artifacts/browser-real-smoke.json, artifacts/real-migration-preservation.json, artifacts/real-empty-workspace.png, artifacts/real-admin-desktop.png, artifacts/real-units-mobile.png, and artifacts/real-tenant-mobile.png. They are local, ignored by Git, and can be regenerated from documented commands. Earlier demonstration-run artifacts are historical evidence, not evidence of current real-mode operation.
 
-Current backend evidence is `artifacts/forecasting-tests.xml`; retained-data checks are `artifacts/forecast-migration-preservation.json`. Browser evidence includes `artifacts/browser-smoke.json`, `artifacts/forecast-desktop.png`, `artifacts/forecast-mobile.png`, `artifacts/archived-units.png`, and `artifacts/unit-management-mobile.png`. Earlier Phase 1/unit-removal records remain separate. These local artifacts are ignored by Git; run the documented commands to generate current evidence.
+The browser runner creates accounts, test credit and explicitly generated API reading fixtures in a fresh isolated LOCAL database. It refuses non-loopback hosts. Its displayed measurement/billing results verify software behavior only; they do not prove an actual meter connection, physical switching, payment receipt, or real-world XGBoost accuracy. Physical meters were not connected during this task.
 
-The browser script approves a PHP 100 development load, retrains a synthetic model, and archives/restores a demo unit. Use an isolated simulation database. These checks verify implementation, not payment receipt, calibrated meter performance, breaker safety, or real-data XGBoost accuracy. The hardware-source training test also uses generated fixtures, not experimental measurements.
+Latest Render deployment and GitHub-hosted CI status are not independently verified. Hosted load/memory capacity and fresh cloud-snapshot restoration are also unverified. Source/configuration and successful local runs are separate from hosted deployment evidence.
 
-## Chapter 3 evaluation still required
+## Research evaluation still required
 
-Prepare actual apparatus IDs, reference-meter calibration, timestamped PZEM-versus-reference readings, absolute/relative error calculations, and documented observation conditions. Define forecast data splits, coverage, baselines, and metrics before real-data model trials. Measure estimated-credit-duration error only after a trained forecast exists and the exhaustion/disconnection policy is approved.
+Record apparatus IDs, calibration/reference measurements, observation conditions, timestamped comparison data, and absolute/relative errors. Collect representative actual consumption and predefine chronological splits, baselines, recursive multi-hour backtests, duration-estimate error, and acceptance criteria. Software coverage minimums are not sufficient experimental validation.
 
-Record endurance duration, dropped/replayed packets, Wi-Fi outage start/end, recovery behavior, rejected readings, and database consistency. Physical command acknowledgment/actuation trials require the separately reviewed safety design; no such results are claimed by this software prototype.
+Evaluate gateway persistence/replay, outages, endurance, host backups/restoration and measured load. Any physical actuator/acknowledgment testing requires its separately implemented hardware design. No such physical results are claimed by the website.

@@ -249,7 +249,7 @@ def forecast_payload(unit, now=None):
                             .order_by(ForecastJob.id.desc()).limit(1))
     result = dict(status='insufficient_data', message='No trained model yet', unit_id=unit.id, unit=unit.name,
                   source=unit.device.source if unit.device else None, synthetic=bool(unit.device and unit.device.source == 'simulation'),
-                  detail='Train on stored hourly readings: at least 7 days for a synthetic demo or 30 days for hardware.',
+                  detail='Train on at least 30 covered days of readings from this meter.' if not current_app.config['SIMULATION_MODE'] else 'Train on stored hourly readings: at least 7 days for a synthetic demo or 30 days for hardware.',
                   remaining_duration=None, horizon_hours=0, points=[], model=None,
                   job=dict(id=job.id, status=job.status, message=job.message) if job else None)
     if not model:
@@ -264,8 +264,10 @@ def forecast_payload(unit, now=None):
             Forecast.model_version == latest.model_version).order_by(Forecast.timestamp)).all()
         future = [row for row in curve if aware(row.timestamp) >= now]
         if future:
-            rates = db.session.scalars(select(Rate).where(Rate.effective_at <= aware(curve[-1].timestamp)+HOUR)
-                                       .order_by(Rate.effective_at)).all()
+            query = select(Rate).where(Rate.effective_at <= aware(curve[-1].timestamp)+HOUR)
+            if not current_app.config['SIMULATION_MODE']:
+                query = query.where(Rate.is_demo.is_(False))
+            rates = db.session.scalars(query.order_by(Rate.effective_at)).all()
             result.update(status='available', message='Synthetic demonstration forecast' if model.source == 'simulation' else 'XGBoost consumption forecast',
                           detail='Hourly predictions use earlier consumption. Later hours use previous predictions. '
                                  'Credit duration assumes uniform use within each hour and is limited to this forecast horizon.',

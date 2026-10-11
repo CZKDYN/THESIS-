@@ -2,6 +2,8 @@
 
 Browser APIs use the authenticated Flask session, server-side role checks, and `X-CSRFToken` for POSTs. Obtain the token from the dashboard's `csrf-token` meta element. Do not use browser session authentication for device traffic.
 
+Real mode excludes retired demonstration units and seeded tariffs from the workspace. Missing measurements are null, not invented zeroes. Sessions are invalidated when the account's session version changes. Temporary-password accounts must use `/account/password` before accessing other authenticated routes.
+
 | Method | Path | Access / behavior |
 | --- | --- | --- |
 | GET | `/health` | Database connectivity and active environment mode. Not a functional readiness check. |
@@ -13,10 +15,14 @@ Browser APIs use the authenticated Flask session, server-side role checks, and `
 | GET | `/api/transactions/export` | Scoped CSV, optional authorized `unit_id`, at most 10,000 records. Admins may use `include_archived=true` to export retained history. |
 | GET / POST | `/api/rates` | Admin; history or `{ "rate": "12.85", "effective_at": "future timezone-aware ISO timestamp" }`. Omit effective date for now. |
 | POST | `/api/units` | Admin; `name`, `room`, `device_id`. Creates a hardware device and zero-credit account. |
-| GET | `/api/units` | Admin; `status=active` (default) or `status=archived`. |
+| GET | `/api/units` | Admin; `status=active` (default), `archived`, or `demo` for retained demonstration history. Demo history has no restore operation in real mode. |
+| POST | `/api/units/<id>/edit` | Admin; `name`, `room`, `threshold`. Preserves device identity and balance/history. |
 | POST | `/api/units/<id>/archive` | Admin; removes the unit from the active workspace, disables tenant access and meter ingestion, rejects pending load requests, and retains balances and all records. |
 | POST | `/api/units/<id>/restore` | Admin; restores the same unit, existing tenant login, and meter ingestion. Rejected requests stay rejected. |
-| POST | `/api/units/<id>/tenant` | Admin; `name`, `email`, `password` (12–128 chars). Creates an account in an unassigned unit. |
+| POST | `/api/units/<id>/tenant` | Admin; `name`, `email`, `password` (12–128 chars). Creates a current tenant in an unassigned unit and requires first-login password change. |
+| POST | `/api/units/<id>/tenant/password` | Admin; `password`. Sets a temporary password, revokes existing sessions, and requires a private password at next sign-in. |
+| POST | `/api/units/<id>/tenant/end` | Admin; revokes access, rejects pending requests, retains the former account/history and unit balance, and permits a replacement tenant. |
+| POST | `/api/units/<id>/device-token` | Admin + current password; `current_password`, `action=generate` (default) or `revoke`. Returns a one-time token only for generate; previous tokens are invalidated. Response is not cached. |
 | POST | `/api/iot/readings` | Device bearer authentication, scoped to the registered device and unit. |
 | GET | `/api/iot/instructions` | Device bearer authentication; returns an empty command list and `control_enabled=false`. |
 
@@ -25,6 +31,14 @@ Browser APIs use the authenticated Flask session, server-side role checks, and `
 Forecast status is `select_unit`, `insufficient_data`, `waiting_for_readings`, or `available`. An available response contains future hourly `points` (`timestamp` and decimal `kwh`), `generated_at`, `horizon_hours`, and an optional `remaining_duration` in seconds. A null duration is an unsupported estimate, not zero remaining credit. `model` includes the version, training time, source, synthetic flag, coverage, chronological splits, test metrics, baselines, and held-out comparison points. `job` is null or contains `id`, `status`, and `message`.
 
 Training is asynchronous: 202 means queued, not successfully trained. Poll the scoped forecast endpoint or dashboard for a completed/failed job. Missing training coverage can fail a job while an existing model remains available. Forecasting never modifies balances or sends actuator commands. See [forecasting methods](forecasting.md) for assumptions and interpretation.
+
+## Account and owner setup forms
+
+`/setup` accepts a hosting-secret `setup_token`, name/email, new password and confirmation only while no active administrator exists. POSTs require CSRF. PostgreSQL serializes concurrent setup attempts. An absent setup secret disables owner creation rather than supplying a public password.
+
+Authenticated `/account` edits name/email after current-password verification. `/account/password` verifies the current password and confirmation, changes the password, revokes other sessions, and retains the requesting session. Administrator tenant resets require another first-login change. No email delivery or unauthenticated recovery route is provided.
+
+Tenant credit requests are scoped to the current user. Transaction lists/exports and notifications exclude records before that account's creation; consumption is unit-meter history. Administrator demo exports require explicit `include_demo=true` and normally `include_archived=true`. Retired sample names can be reused for newly registered physical units while the old label receives a demo suffix; records retain their original IDs and sources.
 
 ## Hardware transmission
 
@@ -66,6 +80,7 @@ For a confirmed physical meter reset, use a **new** stable `meter_epoch` and `re
 - PostgreSQL row locks serialize account and device updates. Balance, reading, and corresponding transaction commit together. Reviewed requests and linked reading/credit transactions have database-level unique constraints.
 - Electricity rates have effective dates. Intervals spanning a rate change distribute interval energy proportionally across elapsed time at each applicable rate. This assumes uniform consumption **within that interval**; send frequent readings to reduce uncertainty. A stored historical transaction is never recomputed with the latest rate.
 - Exhausted credit records a review-required condition. Hardware status remains the observed device status; the server does not invent a physical trip or issue an actuator command. Negative balances retain any measured overrun until the adviser-approved policy is defined.
-- Simulation uses this same billing service. Only its clearly synthetic supply state may disconnect on exhausted credit or reconnect after a top-up. A simulated protective trip is never automatically reclosed.
+- Configure a real tariff covering each reading interval. Retained seeded demonstration tariffs are excluded in real mode.
+- Credit belongs to the unit; ending a tenancy neither erases nor refunds the balance. Settle carryover externally according to dormitory policy before assigning the next tenant.
 
-Use the scoped CSV export and structured `meter_rejected` / `simulation_transmission` logs for software evaluation. Device tokens, production passwords, and `.env` contents must never enter test records.
+Use the scoped CSV export and structured `meter_rejected` logs for software evaluation. Device tokens, production passwords, and `.env` contents must never enter test records. No simulator runs in normal deployment.

@@ -162,6 +162,11 @@ def test_registration_and_assignment(client,app):
     assert post(client,f'/api/units/{unit_id}/tenant',{'name':'Another','email':'another@test.local','password':'InitialPassword!2026'}).status_code==409
     client.post('/logout',data={'csrf_token':csrf_token(client)})
     assert login(client,'new@test.local','InitialPassword!2026').status_code==302
+    assert client.get('/api/snapshot').json['password_change_required']
+    import re
+    token=re.search(r'name="csrf-token" content="([^"]+)"',client.get('/account/password').get_data(as_text=True)).group(1)
+    assert client.post('/account/password',data={'csrf_token':token,'current_password':'InitialPassword!2026',
+        'new_password':'TenantOwnPassword!2026','confirm_password':'TenantOwnPassword!2026'}).status_code==302
     assert [u['id'] for u in client.get('/api/snapshot').json['units']]==[unit_id]
 
 

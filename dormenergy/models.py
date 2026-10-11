@@ -30,13 +30,19 @@ class User(UserMixin, db.Model):
     email = db.Column(db.String(254), nullable=False, unique=True)
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(16), nullable=False)
-    unit_id = db.Column(db.Integer, db.ForeignKey("dormitory_units.id"), unique=True)
+    unit_id = db.Column(db.Integer, db.ForeignKey("dormitory_units.id"))
     active = db.Column(db.Boolean, nullable=False, default=True)
+    tenancy_ended_at = db.Column(db.DateTime(timezone=True))
+    must_change_password = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
+    session_version = db.Column(db.Integer, nullable=False, default=1, server_default='1')
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     unit = db.relationship("Unit")
     __table_args__ = (
         CheckConstraint("role IN ('admin', 'tenant')", name="valid_user_role"),
         CheckConstraint("role != 'tenant' OR unit_id IS NOT NULL", name="tenant_requires_unit"),
+        db.Index('uq_current_tenant_unit', 'unit_id', unique=True,
+                 postgresql_where=db.text("role = 'tenant' AND tenancy_ended_at IS NULL"),
+                 sqlite_where=db.text("role = 'tenant' AND tenancy_ended_at IS NULL")),
     )
 
     @property
@@ -81,6 +87,7 @@ class Rate(db.Model):
     php_per_kwh = db.Column(db.Numeric(10, 4), nullable=False)
     effective_at = db.Column(db.DateTime(timezone=True), nullable=False, unique=True, index=True)
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    is_demo = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
     __table_args__ = (CheckConstraint("php_per_kwh > 0", name="positive_rate"),)
 
 

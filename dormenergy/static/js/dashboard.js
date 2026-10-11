@@ -41,6 +41,7 @@ async function api(path, payload) {
   });
   if (response.status === 401) { window.location.assign('/login'); throw new Error('Your session expired.'); }
   const result = await response.json();
+  if (result.password_change_required) {window.location.assign('/account/password');throw new Error(result.error);}
   if (!response.ok) throw new Error(result.error || 'The request could not be completed.');
   return result;
 }
@@ -77,7 +78,7 @@ function chartConfiguration(series, canvas, label) {
 }
 function renderOverviewChart() {
   const series = state.charts[period];
-  $('#chart-total').textContent = num(series.values.reduce((a,b)=>a+(b || 0),0));
+  $('#chart-total').textContent = series.values.some(value=>value!==null) ? num(series.values.reduce((a,b)=>a+(b || 0),0)) : '—';
   $('#chart-total-period').textContent = {hourly:'in the last 24 hours',daily:'in the last 7 days',history:'in the last 30 days'}[period];
   $('#chart-note').textContent = `${state.units.some(u=>u.source==='simulation') ? 'Includes synthetic simulation readings' : 'Recorded consumption'} · Asia/Manila · gaps indicate missing observations`;
   if (!overviewChart) overviewChart = new Chart($('#overview-chart'),chartConfiguration(series,$('#overview-chart'),'Actual consumption'));
@@ -144,10 +145,11 @@ function alertRow(n) {
 function render() {
   const admin = state.user.role === 'admin';
   const units = state.units;
-  $('#mode-pill').innerHTML = icon('info') + (state.simulation ? 'Simulation environment' : 'Hardware environment');
+  $('#mode-pill').innerHTML = icon('info') + (state.simulation ? 'Simulation environment' : 'Live workspace');
   $('#stat-balance').textContent = pesos(state.summary.balance);
-  $('#stat-energy').textContent = num(state.summary.today_kwh);
-  $('#stat-power').textContent = num(state.summary.power_w,0);
+  $('#stat-energy').textContent = state.summary.today_kwh===null?'—':num(state.summary.today_kwh);
+  $('#stat-power').textContent = state.summary.power_w===null?'—':num(state.summary.power_w,0);
+  if ($('#workspace-setup')) $('#workspace-setup').hidden = state.simulation || (units.length>0 && state.rate!==null && units.every(u=>u.tenant_id && u.token_provisioned && u.reading_at));
   $('#stat-devices').innerHTML = admin ? `${state.summary.online}<small>/ ${units.length} online</small>` : html(titleCase(units[0]?.power_status));
   $('#stat-device-footer').textContent = admin ? `${units.length-state.summary.online} offline or awaiting readings` : (units[0]?.online ? 'Device is communicating' : 'Device offline or awaiting readings');
   const streaming = units.some(u=>u.online);
@@ -165,7 +167,7 @@ function render() {
   $('#unit-cards').innerHTML = units.map(u=>`
     <div class="unit-card"><div class="unit-card-head"><span class="unit-avatar">${icon('home')}</span><div><h3>${html(u.name)}</h3><div class="unit-room">${html(u.room)}</div></div>${badge(u.power_status)}</div>
     <div class="unit-balance-label">Available prepaid balance</div><div class="unit-balance">${pesos(u.balance)}</div><div class="balance-track"><div class="balance-fill ${Number(u.balance)<=Number(u.threshold)?'low':''}" data-progress="${Math.max(0,Math.min(100,Number(u.balance)/1000*100))}"></div></div>
-    <div class="unit-metrics"><div><span>Used today</span><strong>${num(u.today_kwh)} <small>kWh</small></strong></div><div><span>Current power</span><strong>${u.power===null?'—':num(u.power,0)} <small>W</small></strong></div></div><div class="unit-card-foot"><span>${html(u.source==='simulation'?'Simulated meter':'Hardware meter')}</span><button class="text-button" data-unit="${u.id}">${admin?'View unit':'View consumption'} ${icon('arrow')}</button></div></div>`).join('');
+    <div class="unit-metrics"><div><span>Used today</span><strong>${u.today_kwh===null?'—':num(u.today_kwh)} <small>kWh</small></strong></div><div><span>Current power</span><strong>${u.power===null?'—':num(u.power,0)} <small>W</small></strong></div></div><div class="unit-card-foot"><span>${html(u.source==='simulation'?'Simulated meter':'Hardware meter')}</span><button class="text-button" data-unit="${u.id}">${admin?'View unit':'View consumption'} ${icon('arrow')}</button></div></div>`).join('');
   if (!units.length) $('#unit-cards').innerHTML = empty('No active units. Register a unit or restore one from Dormitory units.');
   $$('[data-progress]').forEach(el=>el.style.width=el.dataset.progress+'%');
   $('#recent-transactions').innerHTML = state.transactions.slice(0,4).map(activityRow).join('') || empty('No activity yet.');
@@ -177,19 +179,25 @@ function render() {
   $('#loads-table').innerHTML = state.requests.map(r=>`<tr><td><strong>${html(r.reference)}</strong><small>${html(date(r.timestamp))}</small></td><td>${html(r.unit)}<small>${html(r.tenant)}</small></td><td><strong>${pesos(r.amount)}</strong></td><td>${badge(r.status)}</td><td class="wrap-cell">${admin && r.status==='pending'?`<div class="review-buttons"><button class="btn btn-primary btn-small" data-review="${r.id}" data-decision="approved">Approve</button><button class="btn btn-danger btn-small" data-review="${r.id}" data-decision="rejected">Reject</button></div>${r.note?`<small>${html(r.note)}</small>`:''}`:html(r.note || 'Reviewed by administrator')}</td></tr>`).join('') || empty('No load requests yet. New requests will appear here.',5);
   $('#transactions-table').innerHTML = state.transactions.map(t=>`<tr><td>${html(date(t.timestamp))}</td><td>${html(t.unit)}</td><td class="wrap-cell">${html(t.description)}</td><td class="${Number(t.amount)>0?'positive':'negative'}">${Number(t.amount)>0?'+':'−'}${exactPesos(t.amount)}</td><td>${pesos(t.balance_after)}</td></tr>`).join('') || empty('No transactions recorded yet.',5);
   $('#notifications-list').innerHTML = state.notifications.map(alertRow).join('') || empty('No notifications yet.');
-  $('#measurement-cards').innerHTML = units.map(u=>`<article class="card measurement-card"><h3>${html(u.name)} ${badge(u.online?'connected':'offline')}</h3><div class="measurement-values"><div><span>Voltage</span><strong>${u.online?num(u.voltage,1):'—'} <small>V</small></strong></div><div><span>Current</span><strong>${u.online?num(u.current,3):'—'} <small>A</small></strong></div><div><span>Active power</span><strong>${u.power===null?'—':num(u.power,0)} <small>W</small></strong></div><div><span>Cumulative energy</span><strong>${num(u.energy,3)} <small>kWh</small></strong></div></div><p class="small muted">${html(u.source==='simulation'?'Synthetic readings':'Hardware readings')} · Last measurement ${html(date(u.reading_at))}</p></article>`).join('');
-  $('#device-cards').innerHTML = units.map(u=>`<article class="card device-card"><div class="device-card-heading"><h3>${html(u.name)}</h3>${badge(u.online?'connected':'offline')}</div><dl><dt>ESP32 identifier</dt><dd>${html(u.device)}</dd><dt>Data source</dt><dd>${html(u.source==='simulation'?'Simulation · no physical hardware':'Hardware · authenticated API')}</dd><dt>Raspberry Pi gateway</dt><dd>${u.source==='simulation'?'Simulated gateway':u.gateway_online?'Recent authenticated communication':'Awaiting communication'}</dd><dt>Last received / last measured</dt><dd>${html(date(u.last_seen))}<br>${html(date(u.reading_at))}</dd><dt>Synchronization</dt><dd>${u.online?'Fresh readings':'Offline or stale; ordered replay required'}</dd><dt>Last reported supply state</dt><dd>${html(titleCase(u.last_power_status))}${u.online?'':' · may be stale'}</dd></dl></article>`).join('');
+  $('#measurement-cards').innerHTML = units.map(u=>`<article class="card measurement-card"><h3>${html(u.name)} ${badge(u.online?'connected':'offline')}</h3><div class="measurement-values"><div><span>Voltage</span><strong>${u.online?num(u.voltage,1):'—'} <small>V</small></strong></div><div><span>Current</span><strong>${u.online?num(u.current,3):'—'} <small>A</small></strong></div><div><span>Active power</span><strong>${u.power===null?'—':num(u.power,0)} <small>W</small></strong></div><div><span>Cumulative energy</span><strong>${u.energy===null?'—':num(u.energy,3)} <small>kWh</small></strong></div></div><p class="small muted">${html(u.source==='simulation'?'Synthetic readings':'Hardware readings')} · Last measurement ${html(date(u.reading_at))}</p></article>`).join('');
+  $('#device-cards').innerHTML = units.map(u=>`<article class="card device-card"><div class="device-card-heading"><h3>${html(u.name)}</h3>${badge(u.online?'connected':'offline')}</div><dl><dt>ESP32 identifier</dt><dd>${html(u.device)}</dd><dt>Data source</dt><dd>${html(u.source==='simulation'?'Simulation · no physical hardware':'Hardware · authenticated API')}</dd><dt>Raspberry Pi gateway</dt><dd>${u.source==='simulation'?'Simulated gateway':u.gateway_online?'Recent authenticated communication':'Awaiting communication'}</dd><dt>Last received / last measured</dt><dd>${html(date(u.last_seen))}<br>${html(date(u.reading_at))}</dd><dt>Synchronization</dt><dd>${u.online?'Fresh readings':'Offline or stale; ordered replay required'}</dd><dt>Last reported supply state</dt><dd>${html(titleCase(u.last_power_status))}${u.online?'':' · may be stale'}</dd></dl>${admin && u.source==='hardware'?`<div class="device-credentials"><button class="btn btn-secondary btn-small" data-device-token="${u.id}">${u.token_provisioned?'Manage device token':'Generate device token'}</button></div>`:''}</article>`).join('');
   $('#events-list').innerHTML = state.events.map(e=>`<div class="activity-row"><span class="activity-icon">${icon('chip')}</span><div class="activity-copy"><strong>${html(titleCase(e.kind))} · ${html(titleCase(e.state))}</strong><small>${html(e.message)} · ${html(date(e.timestamp))}</small></div></div>`).join('') || empty('No device events recorded.');
   const rateInput = $('#rate');
-  if (rateInput && !rateInput.value) rateInput.value = state.rate;
+  if (rateInput && !rateInput.value && state.rate!==null) rateInput.value = state.rate;
   renderOverviewChart();
   if (view==='consumption') renderDetailChart();
   renderForecast(state.forecast);
 }
 function renderUnits() {
-  const archived = $('#unit-status').value === 'archived';
-  const units = archived ? archivedUnits : state.units;
-  $('#units-table').innerHTML = units.map(u=>`<tr><td><strong>${html(u.name)}</strong><small>${html(u.room)}${archived?` · Removed ${html(date(u.archived_at))}`:''}</small></td><td>${html(u.tenant)}</td><td><strong>${pesos(u.balance)}</strong></td><td>${html(u.device)}<small>${html(u.source)}</small></td><td>${badge(archived?'archived':u.power_status)}</td><td><div class="unit-actions">${archived?`<a class="text-button" href="/api/transactions/export?unit_id=${u.id}&include_archived=true">Export history</a><button class="btn btn-secondary btn-small" data-restore="${u.id}">Restore unit</button>`:`${u.tenant==='Unassigned'?`<button class="btn btn-secondary btn-small" data-assign="${u.id}">Assign tenant</button>`:`<button class="text-button" data-unit="${u.id}">View ${icon('arrow')}</button>`}<button class="btn btn-danger btn-small" data-remove="${u.id}">Remove unit</button>`}</div></td></tr>`).join('') || empty(archived?'No archived units.':'No active units. Register a unit to get started.',6);
+  const status=$('#unit-status').value;
+  const archived=status!=='active', demo=status==='demo';
+  const units=archived?archivedUnits:state.units;
+  $('#units-table').innerHTML=units.map(u=>{
+    let actions;
+    if(archived) actions=`<a class="text-button" href="/api/transactions/export?unit_id=${u.id}&include_archived=true${demo?'&include_demo=true':''}">Export history</a>${demo?'':`<button class="btn btn-secondary btn-small" data-restore="${u.id}">Restore unit</button>`}`;
+    else actions=`<button class="btn btn-secondary btn-small" data-edit-unit="${u.id}">Edit unit</button>${u.tenant_id?`<button class="btn btn-secondary btn-small" data-manage-tenant="${u.id}">Manage tenant</button>`:`<button class="btn btn-secondary btn-small" data-assign="${u.id}">Assign tenant</button>`}<button class="btn btn-danger btn-small" data-remove="${u.id}">Remove unit</button>`;
+    return `<tr><td><strong>${html(u.name)}</strong><small>${html(u.room)}</small></td><td>${html(u.tenant)}<small>${html(u.tenant_email||'')}</small></td><td><strong>${pesos(u.balance)}</strong></td><td>${html(u.device)}<small>${html(u.source)}</small></td><td>${badge(archived?'archived':u.power_status)}</td><td><div class="unit-actions">${actions}</div></td></tr>`;
+  }).join('')||empty(demo?'No previous demonstration records.':archived?'No archived units.':'No active units. Register a unit to get started.',6);
 }
 async function refresh() {
   if(snapshotBusy) return;
@@ -197,8 +205,8 @@ async function refresh() {
   try {
     const filter = $('#unit-filter')?.value;
     state=await api('/api/snapshot'+(filter?`?unit_id=${filter}`:''));
-    if (state.user.role === 'admin' && $('#unit-status').value === 'archived') {
-      archivedUnits = (await api('/api/units?status=archived')).units;
+    if (state.user.role === 'admin' && $('#unit-status').value !== 'active') {
+      archivedUnits = (await api('/api/units?status='+$('#unit-status').value)).units;
     }
     $('#connection-alert').hidden=true;
     render();
@@ -234,13 +242,16 @@ document.addEventListener('click',event=>{
   const button=event.target.closest('button');if(!button)return;
   if(button.dataset.view)setView(button.dataset.view);
   if(button.dataset.open){const dialog=$('#'+button.dataset.open);dialog.querySelectorAll('.form-error').forEach(el=>el.hidden=true);dialog.showModal();}
-  if(button.hasAttribute('data-close'))button.closest('dialog')?.close();
+  if(button.hasAttribute('data-close')){const dialog=button.closest('dialog');if(dialog?.id==='device-secret-dialog')clearDeviceSecret();dialog?.close();}
   if(button.dataset.period){period=button.dataset.period;$$('[data-period]').forEach(b=>b.classList.toggle('active',b===button));if(state)renderOverviewChart();}
   if(button.dataset.unit){if(state?.user.role==='admin'){$('#unit-filter').value=button.dataset.unit;refresh();setView('overview');}else setView('consumption');}
   if(button.dataset.amount)$('#load-amount').value=button.dataset.amount;
   if(button.dataset.review){const item=state.requests.find(r=>r.id===Number(button.dataset.review));const decision=button.dataset.decision;
     confirm(`${decision==='approved'?'Approve':'Reject'} this load request?`,`${item.unit} · ${pesos(item.amount)}. ${decision==='approved'?'This adds prepaid credit once and records a transaction.':'No credit will be added. The tenant will be notified.'}`,async()=>{const result=await api(`/api/load-requests/${item.id}/review`,{decision});toast(result.message);});}
   if(button.dataset.assign){const unit=state.units.find(u=>u.id===Number(button.dataset.assign));$('#tenant-form input[name="unit_id"]').value=unit.id;$('#assignment-label').textContent=`Create a tenant account for ${unit.name}.`;$('#tenant-dialog .form-error').hidden=true;$('#tenant-dialog').showModal();}
+  if(button.dataset.editUnit){const unit=state.units.find(u=>u.id===Number(button.dataset.editUnit));const form=$('#edit-unit-form');form.elements.unit_id.value=unit.id;form.elements.name.value=unit.name;form.elements.room.value=unit.room;form.elements.threshold.value=unit.threshold;form.querySelector('.form-error').hidden=true;$('#edit-unit-dialog').showModal();}
+  if(button.dataset.manageTenant){const unit=state.units.find(u=>u.id===Number(button.dataset.manageTenant));$('#reset-tenant-form').elements.unit_id.value=unit.id;$('#tenant-details').textContent=`${unit.name} · ${unit.tenant} · ${unit.tenant_email}`;$('#manage-tenant-dialog .form-error').hidden=true;$('#manage-tenant-dialog').showModal();}
+  if(button.dataset.deviceToken){const unit=state.units.find(u=>u.id===Number(button.dataset.deviceToken));$('#device-token-form').elements.unit_id.value=unit.id;$('#device-token-label').textContent=`${unit.name} · ${unit.device}`;$('#device-token-dialog .form-error').hidden=true;$('#device-token-dialog').showModal();}
   if(button.dataset.remove){const unit=state.units.find(u=>u.id===Number(button.dataset.remove));
     confirm(`Remove ${unit.name}?`,'This archives the unit and retains its balance and history. Tenant access and meter updates will stop. Pending load requests will be rejected. You can restore the unit from Archived units.',async()=>{const result=await api(`/api/units/${unit.id}/archive`,{});$('#unit-filter').value='';toast(result.message);});}
   if(button.dataset.restore){const unit=archivedUnits.find(u=>u.id===Number(button.dataset.restore));
@@ -251,7 +262,7 @@ function bindForm(selector, endpoint, payloadBuilder, onSuccess) {
   form.addEventListener('submit',async event=>{
     event.preventDefault();const button=form.querySelector('button[type="submit"], .dialog-actions .btn-primary');const errorBox=form.querySelector('.form-error');
     button.disabled=true;errorBox.hidden=true;
-    try{const values=Object.fromEntries(new FormData(form));const result=await api(typeof endpoint==='function'?endpoint(values):endpoint,payloadBuilder(values));form.closest('dialog').close();form.reset();toast(result.message);onSuccess?.();await refresh();}
+    try{const values=Object.fromEntries(new FormData(form));const result=await api(typeof endpoint==='function'?endpoint(values):endpoint,payloadBuilder(values));form.closest('dialog').close();form.reset();toast(result.message);onSuccess?.(result);await refresh();}
     catch(error){errorBox.textContent=error.message;errorBox.hidden=false;}
     finally{button.disabled=false;}
   });
@@ -259,6 +270,26 @@ function bindForm(selector, endpoint, payloadBuilder, onSuccess) {
 bindForm('#load-form','/api/load-requests',v=>({amount:v.amount,note:v.note,reference:requestReference}),()=>{requestReference=crypto.randomUUID();setView('loads');});
 bindForm('#unit-form','/api/units',v=>v,()=>{if($('#unit-filter'))$('#unit-filter').value='';setView('units');});
 bindForm('#tenant-form',v=>`/api/units/${v.unit_id}/tenant`,v=>({name:v.name,email:v.email,password:v.password}));
+bindForm('#edit-unit-form',v=>`/api/units/${v.unit_id}/edit`,v=>({name:v.name,room:v.room,threshold:v.threshold}));
+bindForm('#reset-tenant-form',v=>`/api/units/${v.unit_id}/tenant/password`,v=>({password:v.password}));
+bindForm('#device-token-form',v=>`/api/units/${v.unit_id}/device-token`,v=>({action:v.action,current_password:v.current_password}),result=>{
+  if(!result.token)return;
+  $('#device-secret-value').value=result.token;
+  $('#device-endpoint').value=window.location.origin+result.ingestion_path;
+  $('#device-header-help').textContent=`Device ID: ${result.device_id} · Unit ID: ${result.unit_id}. Send X-Device-ID with this identifier and Authorization: Bearer with the token.`;
+  $('#device-secret-dialog').showModal();
+});
+$('#end-tenancy')?.addEventListener('click',()=>{
+  const id=$('#reset-tenant-form').elements.unit_id.value;
+  $('#manage-tenant-dialog').close();
+  confirm('End this tenancy?','The tenant will lose access and pending requests will be rejected. The unit balance and all records are retained. Settle the remaining credit according to your dormitory policy before assigning the next tenant.',async()=>{const result=await api(`/api/units/${id}/tenant/end`,{});toast(result.message);});
+});
+$('#copy-device-token')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('#device-secret-value').value);toast('Device token copied.');}catch{toast('Select the token and copy it manually.',true);}});
+function clearDeviceSecret() {$('#device-secret-value').value='';$('#device-endpoint').value='';$('#device-header-help').textContent='';}
+$$('dialog').forEach(dialog=>dialog.addEventListener('close',()=>{
+  dialog.querySelectorAll('input[type="password"]').forEach(input=>input.value='');
+  if(dialog.id==='device-secret-dialog')clearDeviceSecret();
+}));
 $('#rate-form')?.addEventListener('submit',event=>{
   event.preventDefault();const values=Object.fromEntries(new FormData(event.target));
   const payload={rate:values.rate};if(values.effective_at)payload.effective_at=new Date(values.effective_at).toISOString();
