@@ -28,6 +28,7 @@ The free service may sleep, pausing forecast jobs and making physical gateway re
 
 ## Troubleshoot
 
+- Expired sign-in form after deployment or key rotation: open /login in a fresh tab and sign in again. Rejected login forms redirect to a fresh GET with a notice; credentials are never replayed. If it repeats on a freshly opened form, clear this site's cookies or try a private window and confirm cookies are permitted and SECRET_KEY is stable across all web workers. Keep SESSION_COOKIE_SECURE=true on hosted HTTPS. Do not disable CSRF protection.
 - Database/startup errors: inspect migrations and the linked DATABASE_URL. Standard postgres/postgresql prefixes are normalized to psycopg while preserving TLS options.
 - Empty dashboard: register actual units. The retained demonstration workspace is intentionally excluded.
 - Sign-in redirects to password change: replace the temporary tenant password before using other routes.

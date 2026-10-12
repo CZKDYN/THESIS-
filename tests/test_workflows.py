@@ -10,7 +10,9 @@ from conftest import csrf_token, login, meter_payload, post, transmit
 
 def test_authentication_csrf_logout(client):
     assert client.get('/api/snapshot').status_code==401
-    assert client.post('/login',data={'email':'admin@test.local','password':'anything'}).status_code==400
+    response = client.post('/login',data={'email':'admin@test.local','password':'anything'})
+    assert response.status_code==303 and response.headers['Location']=='/login'
+    assert client.get('/api/snapshot').status_code==401
     assert login(client,password='wrong').status_code==401
     assert login(client).status_code==302
     assert client.get('/dashboard').status_code==200

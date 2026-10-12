@@ -2,7 +2,7 @@ import logging
 import os
 from datetime import timedelta
 from pathlib import Path
-from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 from flask_wtf.csrf import CSRFError
 from sqlalchemy import text
 from dotenv import load_dotenv
@@ -111,6 +111,11 @@ def create_app(test_config=None):
     def csrf_error(error):
         if request.path.startswith('/api/'):
             return jsonify(error='Session expired. Reload the page and try again.'), 400
+        if request.endpoint == 'web.login' and request.method == 'POST':
+            # Reject the old submission and request a fresh GET; never replay credentials.
+            session.pop('csrf_token', None)
+            flash('Your sign-in page expired. Please sign in again.', 'error')
+            return redirect(url_for('web.login'), code=303)
         return render_template('error.html', code=400, message='Your form expired. Please reload and try again.'), 400
 
     @app.errorhandler(403)
