@@ -13,7 +13,7 @@ Real mode excludes retired demonstration units and seeded tariffs from the works
 | POST | `/api/load-requests` | Tenant submits `amount`, optional `note`, and unique client `reference`. Unit comes from the session, not the payload. |
 | POST | `/api/load-requests/<id>/review` | Admin; `decision` is `approved` or `rejected`. Second review returns 409. |
 | GET | `/api/transactions/export` | Scoped CSV, optional authorized `unit_id`, at most 10,000 records. Admins may use `include_archived=true` to export retained history. |
-| GET / POST | `/api/rates` | Admin; history or `{ "rate": "12.85", "effective_at": "future timezone-aware ISO timestamp" }`. Omit effective date for now. |
+| GET / POST | `/api/rates` | Admin GET returns history, utility policy/reference and active billing rate. POST is blocked with 403 in default locked mode. Deliberate legacy/manual mode alone accepts `{ "rate": "12.85", "effective_at": "future timezone-aware ISO timestamp" }`. |
 | POST | `/api/units` | Admin; `name`, `room`, `device_id`. Creates a hardware device and zero-credit account. |
 | GET | `/api/units` | Admin; `status=active` (default), `archived`, or `demo` for retained demonstration history. Demo history has no restore operation in real mode. |
 | POST | `/api/units/<id>/edit` | Admin; `name`, `room`, `threshold`. Preserves device identity and balance/history. |
@@ -84,7 +84,7 @@ For a confirmed physical meter reset, use a **new** stable `meter_epoch` and `re
 - PostgreSQL row locks serialize account and device updates. Balance, reading, and corresponding transaction commit together. Reviewed requests and linked reading/credit transactions have database-level unique constraints.
 - Electricity rates have effective dates. Intervals spanning a rate change distribute interval energy proportionally across elapsed time at each applicable rate. This assumes uniform consumption **within that interval**; send frequent readings to reduce uncertainty. A stored historical transaction is never recomputed with the latest rate.
 - Exhausted credit records a review-required condition. Hardware status remains the observed device status; the server does not invent a physical trip or issue an actuator command. Negative balances retain any measured overrun until the adviser-approved policy is defined.
-- Configure a real tariff covering each reading interval. Retained seeded demonstration tariffs are excluded in real mode.
+- Confirm the applicable utility source and activate a dated rate through hosting configuration. Locked billing uses only tagged owner-confirmed periods; pending references and legacy/seeded tariffs cannot authorize charges. Expired or gapped intervals reject atomically. Source/period/expiry is retained in rate history. See [rate configuration](utility-rates.md).
 - Credit belongs to the unit; ending a tenancy neither erases nor refunds the balance. Settle carryover externally according to dormitory policy before assigning the next tenant.
 
 Use the scoped CSV export and structured `meter_rejected` logs for software evaluation. Device tokens, production passwords, and `.env` contents must never enter test records. No simulator runs in normal deployment.

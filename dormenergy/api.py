@@ -17,6 +17,7 @@ from .services.billing import DomainError, aware, decimal_value, lock_unit, reso
 from .services.forecasting import forecast_payload
 from .services.accounts import change_password, identity, password_value
 from .services.emailing import ERRORS, cancel_user_mail, configuration_error, invitation_status, issue_link
+from .services.utility_rates import billing_rates, rate_covers, utility_policy
 
 api = Blueprint('api', __name__)
 MANILA = ZoneInfo('Asia/Manila')
@@ -143,10 +144,10 @@ def snapshot():
             by_unit[device_id] += energy
     for item, unit in zip(unitdata, units):
         item['today_kwh'] = str(by_unit[unit.device.id]) if unit.device and unit.device.id in today_devices else None
-    rates = select(Rate).where(Rate.effective_at <= now)
-    if not current_app.config['SIMULATION_MODE']:
-        rates = rates.where(Rate.is_demo.is_(False))
+    rates = billing_rates().where(Rate.effective_at <= now)
     rate = db.session.scalar(rates.order_by(Rate.effective_at.desc()).limit(1))
+    if not rate_covers(rate, now):
+        rate = None
     request_query = select(LoadRequest).where(LoadRequest.unit_id.in_(ids))
     transaction_query = select(Transaction).where(Transaction.unit_id.in_(ids))
     notification_query = select(Notification).where(Notification.unit_id.in_(ids))
@@ -165,6 +166,7 @@ def snapshot():
                                 pending=sum(r.status == 'pending' for r in requests),
                                 power_w=str(sum((Decimal(u['power'] or '0') for u in unitdata), Decimal('0'))) if any(u['online'] for u in unitdata) else None),
                    rate=str(rate.php_per_kwh) if rate else None,
+                   utility_rate=utility_policy(),
                    charts=dict(hourly=dict(labels=[h.strftime('%I %p').lstrip('0') for h in hours], values=[float(hourly[h]) if h in hourly else None for h in hours]),
                                daily=dict(labels=[d.strftime('%a') for d in days], values=[float(daily[d]) if d in daily else None for d in days]),
                                history=dict(labels=[d.strftime('%b %d') for d in historical_days], values=[float(historical[d]) if d in historical else None for d in historical_days])),
@@ -245,6 +247,8 @@ def review_load(request_id):
 @api.post('/rates')
 @admin_required
 def update_rate():
+    if current_app.config['UTILITY_RATE_LOCKED']:
+        raise DomainError('The electricity rate is locked to the utility configuration. Arbitrary rate changes are disabled.', 403)
     payload = json_payload()
     rate = decimal_value(payload.get('rate'), 'rate', Decimal('1000'))
     if rate <= 0 or rate != rate.quantize(Decimal('0.0001')):
@@ -270,7 +274,16 @@ def rate_history():
     if not current_app.config['SIMULATION_MODE']:
         query = query.where(Rate.is_demo.is_(False))
     rates = db.session.scalars(query.order_by(Rate.effective_at.desc()).limit(50)).all()
-    return jsonify(rates=[dict(rate=str(r.php_per_kwh), effective_at=iso(r.effective_at)) for r in rates])
+    active = db.session.scalar(billing_rates().where(Rate.effective_at <= utcnow()).order_by(Rate.effective_at.desc()).limit(1))
+    if not rate_covers(active, utcnow()):
+        active = None
+    return jsonify(policy=utility_policy(), active_rate=str(active.php_per_kwh) if active else None,
+                   active_period=active.billing_period if active else None,
+                   active_source=active.source_reference if active else None,
+                   active_valid_until=iso(active.valid_until) if active else None,
+                   rates=[dict(rate=str(r.php_per_kwh), effective_at=iso(r.effective_at), valid_until=iso(r.valid_until),
+                               provider=r.utility_provider, period=r.billing_period, source=r.source_reference,
+                               owner_confirmed=bool(r.configuration_key)) for r in rates])
 
 
 @api.post('/units')

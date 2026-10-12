@@ -97,6 +97,26 @@ def main():
                     assert (BASE+'/login',BASE+'/login') in requests
                     checks.append('HTTPS browser login succeeds with secure cookies and its automatic same-origin referrer')
                     page.screenshot(path=ARTIFACTS/'https-admin-desktop.png',full_page=True)
+                    page.locator('.nav-link[data-view="settings"]').click()
+                    page.wait_for_function('() => document.querySelector("#utility-reference-rate").value==="14.7400"')
+                    assert page.locator('#utility-reference-rate').evaluate('(element) => element.readOnly')
+                    assert page.locator('#rate-form').count()==0
+                    assert 'Meralco' in page.locator('#utility-provider').inner_text()
+                    assert 'East Rembo, Taguig' in page.locator('#utility-provider').inner_text()
+                    assert 'No confirmed billing rate is active' in page.locator('#utility-billing-rate').inner_text()
+                    token=page.locator('meta[name="csrf-token"]').get_attribute('content')
+                    rejected=owner.request.post(BASE+'/api/rates',data={'rate':'99'},
+                        headers={'X-CSRFToken':token,'Referer':BASE+'/dashboard'})
+                    assert rejected.status==403
+                    assert owner.request.get(BASE+'/api/rates').json()['rates']==[]
+                    page.screenshot(path=ARTIFACTS/'utility-rate-desktop.png',full_page=True)
+                    checks.append('Meralco PHP 14.74 reference is read-only and a forged rate update is rejected without activating billing')
+                    page.set_viewport_size({'width':390,'height':844})
+                    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+                    assert page.locator('#utility-reference-rate').is_visible()
+                    page.screenshot(path=ARTIFACTS/'utility-rate-mobile.png',full_page=True)
+                    page.set_viewport_size({'width':1360,'height':900})
+                    checks.append('Locked utility rate and pending-confirmation explanation fit a phone layout')
                     page.goto(BASE+'/account')
                     page.uncheck('input[name="email_load_updates"]')
                     page.get_by_role('button',name='Save email preferences').click()

@@ -16,6 +16,23 @@ from .services.forecasting import forecast_worker_step, generate_forecasts, trai
 
 
 def register_commands(app):
+    @app.cli.command('apply-utility-rate')
+    def apply_utility_rate():
+        """Append an owner-confirmed utility period from secure hosting configuration."""
+        from .services.utility_rates import apply_configured_rate, utility_policy
+        try:
+            row = apply_configured_rate()
+            if row:
+                from .services.billing import aware
+                state = ('expired' if aware(row.valid_until)<=utcnow() else
+                         'scheduled' if aware(row.effective_at)>utcnow() else 'active')
+                click.echo(f'Utility rate period {state}: {row.utility_provider}, {row.billing_period}, PHP {row.php_per_kwh}/kWh. Historical charges retained.')
+            else:
+                click.echo(utility_policy()['message']+' No new billing rate was activated.')
+        except DomainError as error:
+            db.session.rollback()
+            raise click.ClickException(error.message) from None
+
     @app.cli.command('email-worker')
     @click.option('--interval',default=5.0,type=click.FloatRange(min=1,max=60))
     @click.option('--once',is_flag=True)

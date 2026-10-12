@@ -13,6 +13,7 @@ if ! "$pg_bin/pg_ctl" -D "$cloud_state/pgdata" status >/dev/null 2>&1; then
   "$pg_bin/pg_ctl" -D "$cloud_state/pgdata" -l "$cloud_state/postgres.log" -o "-k $cloud_state/pgsocket -p 5432 -h 127.0.0.1" start
 fi
 .venv/bin/flask --app wsgi db upgrade
+.venv/bin/flask --app wsgi apply-utility-rate
 start_process() {
   local name="$1"
   shift

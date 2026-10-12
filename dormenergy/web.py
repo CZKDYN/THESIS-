@@ -63,7 +63,7 @@ def index():
 @web.get('/dashboard')
 @login_required
 def dashboard():
-    return render_template('dashboard.html')
+    return render_template('dashboard.html', utility_rate_locked=current_app.config['UTILITY_RATE_LOCKED'])
 
 
 @web.route('/setup', methods=['GET', 'POST'])

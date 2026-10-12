@@ -215,6 +215,7 @@ def generate_forecasts(unit_id, now=None):
 
 def credit_duration(balance, curve, rates, now):
     """Bounded projection with scheduled rates; never changes actual balances."""
+    from .utility_rates import rate_covers
     balance = Decimal(str(balance))
     if balance <= 0:
         return 0.0
@@ -226,10 +227,12 @@ def credit_duration(balance, curve, rates, now):
         if start > cursor:
             return None
         changes = [aware(rate.effective_at) for rate in rates if start < aware(rate.effective_at) < end]
-        boundaries = [start, *changes, end]
+        expirations = [aware(rate.valid_until) for rate in rates if getattr(rate, 'valid_until', None)
+                       and start < aware(rate.valid_until) < end]
+        boundaries = sorted(set([start, *changes, *expirations, end]))
         for first, last in zip(boundaries, boundaries[1:]):
             applicable = [rate for rate in rates if aware(rate.effective_at) <= first]
-            if not applicable:
+            if not applicable or not rate_covers(applicable[-1], first, last):
                 return None
             per_second = row.predicted_kwh * applicable[-1].php_per_kwh / Decimal('3600')
             seconds = Decimal(str((last-first).total_seconds()))
@@ -264,9 +267,8 @@ def forecast_payload(unit, now=None):
             Forecast.model_version == latest.model_version).order_by(Forecast.timestamp)).all()
         future = [row for row in curve if aware(row.timestamp) >= now]
         if future:
-            query = select(Rate).where(Rate.effective_at <= aware(curve[-1].timestamp)+HOUR)
-            if not current_app.config['SIMULATION_MODE']:
-                query = query.where(Rate.is_demo.is_(False))
+            from .utility_rates import billing_rates
+            query = billing_rates().where(Rate.effective_at <= aware(curve[-1].timestamp)+HOUR)
             rates = db.session.scalars(query.order_by(Rate.effective_at)).all()
             result.update(status='available', message='Synthetic demonstration forecast' if model.source == 'simulation' else 'XGBoost consumption forecast',
                           detail='Hourly predictions use earlier consumption. Later hours use previous predictions. '

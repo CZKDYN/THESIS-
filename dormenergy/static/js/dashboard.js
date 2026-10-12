@@ -23,7 +23,7 @@ const titles = {
   forecast:['Consumption forecasting','Prepare for a more predictable energy future.'],
   devices:['Device monitoring','Visibility from meter to gateway to dashboard.'],
   notifications:['Workspace notifications','Stay informed about your accounts and devices.'],
-  settings:['Electricity rates','Manage pricing with an auditable effective-date history.']
+  settings:['Electricity rates','Your utility reference, billing validity, and rate history.']
 };
 
 function toast(message, error = false) {
@@ -226,7 +226,15 @@ async function loadRates() {
   if(!$('#rate-history'))return;
   try {
     const data=await api('/api/rates');
-    $('#rate-history').innerHTML=data.rates.map(r=>`<div class="activity-row"><span class="activity-icon green">${icon('bolt')}</span><div class="activity-copy"><strong>${pesos(r.rate)} / kWh</strong><small>Effective ${html(date(r.effective_at))}${new Date(r.effective_at)>new Date()?' · Scheduled':''}</small></div></div>`).join('')||empty('No rates recorded.');
+    if($('#utility-reference-rate')){
+      const policy=data.policy;
+      $('#utility-reference-rate').value=policy.reference_rate?num(policy.reference_rate,4):'Unavailable';
+      $('#utility-provider').textContent=[policy.provider,policy.service_area].filter(Boolean).join(' · ');
+      $('#utility-rate-status').textContent=policy.message;
+      $('#utility-billing-rate').textContent=data.active_rate?`Active billing rate: ₱${num(data.active_rate,4)} / kWh · Period ${data.active_period} · Valid until ${date(data.active_valid_until)}. Source: ${data.active_source}`:'No confirmed billing rate is active. The reference value does not create electricity charges.';
+      $('#utility-source').textContent=policy.confirmed?`Configured source: ${policy.source} · Period: ${policy.period}${policy.effective_at?' · Applies from '+date(policy.effective_at):''} · Valid until ${date(policy.valid_until)}.`:'Awaiting confirmation from the applicable utility bill. No monthly rate is fetched automatically.';
+    }
+    $('#rate-history').innerHTML=data.rates.map(r=>`<div class="activity-row"><span class="activity-icon green">${icon('bolt')}</span><div class="activity-copy"><strong>₱${num(r.rate,4)} / kWh</strong><small>Effective ${html(date(r.effective_at))}${new Date(r.effective_at)>new Date()?' · Scheduled':''}${r.valid_until?' · Valid until '+html(date(r.valid_until)):''}</small><small>${r.owner_confirmed?html(r.provider)+' · '+html(r.period)+' · Owner-confirmed utility source':'Historical manually configured rate'}${r.source?' · '+html(r.source):''}</small></div></div>`).join('')||empty('No billing rates recorded.');
   }catch(error){toast(error.message,true);}
 }
 function emailLabel(status){return {pending:'Pending delivery',sending:'Sending',sent:'Provider accepted',failed:'Not sent / failed',cancelled:'Cancelled',test:'Test only · not sent'}[status]||status;}

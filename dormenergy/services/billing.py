@@ -58,21 +58,26 @@ def parse_timestamp(value):
 
 def charge_for_interval(delta, start, end):
     """Prorate interval energy across rate changes; no finer usage is inferred."""
-    rates = select(Rate)
-    if not current_app.config['SIMULATION_MODE']:
-        rates = rates.where(Rate.is_demo.is_(False))
+    from .utility_rates import billing_rates, rate_covers
+    rates = billing_rates()
     first = db.session.scalar(rates.where(Rate.effective_at <= start).order_by(Rate.effective_at.desc()).limit(1))
-    if first is None:
-        raise DomainError('No electricity rate covers this reading interval.')
+    message = ('No owner-confirmed utility rate covers this reading interval. Confirm the applicable utility bill and validity period.'
+               if current_app.config['UTILITY_RATE_LOCKED'] else 'No electricity rate covers this reading interval.')
+    if not rate_covers(first, start):
+        raise DomainError(message)
     changes = db.session.scalars(rates.where(Rate.effective_at > start, Rate.effective_at <= end).order_by(Rate.effective_at)).all()
     if end == start:
         return Decimal('0'), first
     duration = Decimal(str((end - start).total_seconds()))
     cost, cursor, rate = Decimal('0'), start, first
     for change in changes:
+        if not rate_covers(rate, cursor, aware(change.effective_at)):
+            raise DomainError(message)
         seconds = Decimal(str((aware(change.effective_at) - cursor).total_seconds()))
         cost += delta * (seconds / duration) * rate.php_per_kwh
         cursor, rate = aware(change.effective_at), change
+    if not rate_covers(rate, cursor, end):
+        raise DomainError(message)
     cost += delta * Decimal(str((end - cursor).total_seconds())) / duration * rate.php_per_kwh
     return cost.quantize(MONEY_PRECISION, rounding=ROUND_HALF_UP), rate
 

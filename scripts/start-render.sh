@@ -12,6 +12,7 @@ if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
   exit 1
 fi
 python -m flask --app wsgi db upgrade
+python -m flask --app wsgi apply-utility-rate
 web_pid=''
 forecast_pid=''
 email_pid=''

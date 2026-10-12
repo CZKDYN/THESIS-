@@ -20,7 +20,8 @@ def app(tmp_path):
     if parsed.get_backend_name() == 'postgresql' and not (parsed.database or '').endswith('_test'):
         pytest.fail('TEST_DATABASE_URL must refer to a dedicated database ending in _test.')
     application = create_app({'TESTING': True, 'SECRET_KEY': 'only-for-tests',
-                              'SQLALCHEMY_DATABASE_URI': url, 'SIMULATION_MODE': True})
+                              'SQLALCHEMY_DATABASE_URI': url, 'SIMULATION_MODE': True,
+                              'UTILITY_RATE_LOCKED': False})  # Existing manual-rate regression fixtures.
     with application.app_context():
         # Clear only the dedicated test DB; never the development database.
         db.drop_all()

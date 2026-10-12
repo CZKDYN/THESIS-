@@ -93,7 +93,13 @@ class Rate(db.Model):
     effective_at = db.Column(db.DateTime(timezone=True), nullable=False, unique=True, index=True)
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     is_demo = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
-    __table_args__ = (CheckConstraint("php_per_kwh > 0", name="positive_rate"),)
+    utility_provider = db.Column(db.String(120))
+    billing_period = db.Column(db.String(7))
+    source_reference = db.Column(db.String(240))
+    valid_until = db.Column(db.DateTime(timezone=True))
+    configuration_key = db.Column(db.String(64), unique=True)
+    __table_args__ = (CheckConstraint("php_per_kwh > 0", name="positive_rate"),
+                     CheckConstraint('valid_until IS NULL OR valid_until > effective_at', name='valid_rate_interval'))
 
 
 class Reading(db.Model):

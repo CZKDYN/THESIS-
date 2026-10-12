@@ -5,8 +5,12 @@
 1. In the dormenergy service choose Manual Deploy → Deploy latest commit. Keep the linked PostgreSQL database and existing SECRET_KEY.
 2. Set SIMULATION_MODE=false for clarity. The entrypoint also forces false, so a stale true setting cannot restart simulation. DEMO_PASSWORD is no longer required or used by startup.
 3. Wait for Live, open /login, and use the existing administrator credentials. Previous sessions require a fresh sign-in because account session-version checks are now enabled.
-4. Open Your account and replace the sample administrator name/email and password with your own. Register real units, configure the actual rate, assign tenants, and provision device credentials through the website.
+4. Open Your account and replace the sample administrator name/email and password with your own. Register real units, confirm the applicable utility rate, assign tenants, and provision device credentials through the website.
 5. Verify an authenticated workspace. Old demo units/tenants are retired by migration; their records and money remain available as read-only demonstration history. An empty workspace is correct until actual units are registered.
+
+## Locked utility rate
+
+Electricity rates is now locked by default: the owner-supplied Meralco PHP 14.74/kWh reference is shown read-only, and POST /api/rates is blocked. For visual review, leave UTILITY_RATE_CONFIRMED=false; no billing rate is activated. Actual billing needs an owner-confirmed source/period and validity end in hosting configuration. Startup applies the additive rate migration and idempotent apply-utility-rate step. See [the exact utility configuration guide](utility-rates.md). EPIRA does not supply a single countrywide rate, and the reference is not independently verified as the latest tariff.
 
 ## Enable Resend email on an existing service
 

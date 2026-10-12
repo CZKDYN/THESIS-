@@ -10,7 +10,7 @@ Continue signing in with your existing administrator email/password. Open Your a
 
 Open Dormitory units, choose Register unit, and enter its name, room, and unique physical-meter identifier. New accounts start with zero credit and unknown supply state. Edit unit changes its name/location and low-credit warning threshold without changing the meter identity or ledger.
 
-Set the actual PHP/kWh rate under Electricity rates before meter ingestion. A retained seeded demonstration rate is excluded from real billing. Rate changes apply from their recorded effective time; existing deductions are not recomputed. The system rejects readings whose interval lacks a configured real rate.
+Electricity rates now shows a locked Meralco PHP 14.74/kWh reference for East Rembo, Taguig, supplied by the owner and awaiting bill confirmation. It is not automatically a latest or regulated tariff, and it creates no charges. Confirm the actual applicable utility source/period and activate its rate through [hosting configuration](utility-rates.md) before meter ingestion. Browser/API price changes are blocked in locked mode. Historical deductions are not recomputed. The system rejects intervals with missing, expired or gapped utility coverage; a seeded or legacy manually entered tariff cannot substitute for a confirmed source.
 
 ## Create tenant accounts
 

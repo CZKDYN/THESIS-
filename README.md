@@ -13,7 +13,7 @@ Choose **Manual Deploy → Deploy latest commit** for the `dormenergy` web servi
 
 Existing administrator credentials remain valid. Sign in, open **Your account**, and set your own name/email and a private password. Previous demo units and tenant logins are retired automatically. Historical meter readings, credit/billing records, models, and balances remain in PostgreSQL. Administrators can export them under **Dormitory units → Previous demonstration history**. These records do not enter live totals or train hardware models.
 
-Register your actual units, set the electricity rate, assign tenants, and generate device credentials from the website. See [the operating guide](docs/real-mode.md). A real unit may reuse a previous demonstration name; that sample's retained label receives a demo suffix. Real archived units, physical device identifiers, and tenant emails remain reserved to preserve identity/history.
+Register your actual units, confirm the applicable utility rate, assign tenants, and generate device credentials from the website. See [the operating guide](docs/real-mode.md). A real unit may reuse a previous demonstration name; that sample's retained label receives a demo suffix. Real archived units, physical device identifiers, and tenant emails remain reserved to preserve identity/history.
 
 ## First installation
 
@@ -97,7 +97,11 @@ Rootless PostgreSQL binaries/data and managed process logs live at `/workspace/.
 | `EMAIL_ENCRYPTION_KEY` | Optional dedicated stable Fernet key for queued message encryption. |
 | `TEST_DATABASE_URL` | Dedicated test database whose name must end in `_test`. |
 
-Store timestamps in UTC; charts/records display Asia/Manila time. Scheduled rate inputs use the browser's timezone and are sent as UTC instants.
+Store timestamps in UTC; charts/records display Asia/Manila time. Confirmed utility validity dates require timezone-aware ISO instants.
+
+## Utility rate controls
+
+Electricity rates is locked by default to the owner's **Meralco PHP 14.74/kWh reference** for East Rembo, Taguig. This reference is not independently verified as the latest tariff. It creates no billing rate until the applicable source and validity dates are confirmed through hosting settings. Browser/API rate changes are blocked, old charges are preserved, and prices expire at their recorded period end. See [utility rate configuration](docs/utility-rates.md). For visual review, keep email disabled and utility confirmation false.
 
 ## Validation
 
@@ -108,7 +112,7 @@ TEST_DATABASE_URL='postgresql+psycopg://<role>:<password>@localhost:5432/dormene
 
 On PowerShell, set `$env:TEST_DATABASE_URL`. Portable tests can use temporary SQLite, but PostgreSQL is required for row-lock concurrency validation.
 
-`scripts/browser_real_smoke.py` validates a fresh isolated local real-mode deployment using Playwright/Chromium. It creates accounts, approves test credit, injects explicitly generated API test readings, changes credentials, and archives/restores units. It refuses non-loopback hosts. Supply `ADMIN_SETUP_TOKEN`, `TEST_OWNER_PASSWORD`, and `TEST_TENANT_PASSWORD` for that isolated test only. These are software checks, not physical-meter or payment evidence. Artifacts are ignored by Git. See [testing records](docs/testing.md).
+`scripts/browser_real_smoke.py` validates the legacy/manual tariff workflow on a fresh isolated local real-mode deployment using Playwright/Chromium. Set `UTILITY_RATE_LOCKED=false` only on that isolated test deployment and supply `ADMIN_SETUP_TOKEN`, `TEST_OWNER_PASSWORD`, and `TEST_TENANT_PASSWORD`. It creates accounts, approves test credit, injects generated API test readings, changes credentials, and archives/restores units; it refuses non-loopback hosts. Normal locked-rate and HTTPS checks use `python scripts/browser_https_smoke.py` instead. These are software checks, not physical-meter or payment evidence. Artifacts are ignored by Git. See [testing records](docs/testing.md).
 
 ## Integration and research
 
