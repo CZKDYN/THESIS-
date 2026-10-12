@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import json
+import http.client
 import random
 import ssl
 import time
@@ -10,6 +11,7 @@ import urllib.parse
 import urllib.request
 
 from .clock import Clock
+from . import __version__
 from .config import Config, Device, loopback, secret
 from .queue import Journal
 from .validation import utc
@@ -41,7 +43,7 @@ class Cloud:
             raise RuntimeError('A test backend must remain loopback.')
         if self.config.mode == 'real' and payload and payload.get('gateway_fixture'):
             raise RuntimeError('Fixture transmission is forbidden in real mode.')
-        headers = {'Content-Type': 'application/json', 'User-Agent': 'DormEnergy-Gateway/0.1'}
+        headers = {'Content-Type': 'application/json', 'User-Agent': 'DormEnergy-Gateway/'+__version__}
         if device:
             headers.update({'X-Device-ID': device.device_id, 'Authorization': 'Bearer '+secret(device.token_file)})
         request = urllib.request.Request(self.config.cloud_url+path, method=method, headers=headers,
@@ -50,14 +52,17 @@ class Cloud:
             response = self.opener.open(request, timeout=self.config.timeout)
         except urllib.error.HTTPError as error:
             response = error
-        except (OSError, TimeoutError, urllib.error.URLError):
+        except (OSError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
             return Response(0, {})
         with response:
             try:
-                body = json.loads(response.read(65537))
+                raw = response.read(65537)
+                body = json.loads(raw) if len(raw) <= 65536 else {}
                 if not isinstance(body, dict):
                     body = {}
-            except (ValueError, UnicodeError):
+            except (OSError, TimeoutError, http.client.HTTPException):
+                return Response(0, {})
+            except (ValueError, UnicodeError, RecursionError):
                 body = {}
             return Response(response.code, body)
 
@@ -65,6 +70,8 @@ class Cloud:
 def receipt_matches(payload: dict, receipt: dict) -> bool:
     stored = receipt.get('reading')
     if receipt.get('accepted') is not True or not isinstance(stored, dict):
+        return False
+    if type(stored.get('unit_id')) is not int:
         return False
     try:
         for field in ('device_id', 'unit_id', 'event_id', 'meter_epoch', 'connection_status'):
@@ -105,7 +112,7 @@ class Synchronizer:
         response = self.cloud.request('POST', '/api/iot/readings', device, payload)
         code = response.body.get('error_code')
         category = None
-        if response.status == 201 and response.body.get('accepted') is True and type(response.body.get('id')) is int:
+        if response.status == 201 and response.body.get('accepted') is True and type(response.body.get('id')) is int and response.body['id'] > 0:
             status = 'sent'
         elif response.status == 409:
             # Reconcile every conflict; textual messages are never proof of acceptance.

@@ -1,5 +1,7 @@
 # Testing and actual evidence
 
+The original gateway execution record below is historical (package 0.1.0). Current stabilization evidence for package 0.1.1, expanded failure recovery and the 20-scenario matrix is in [the software validation report](../../docs/software-validation.md) and [committed audit measurements](../../docs/audit-evidence/).
+
 Software checks use disposable fixtures; their energy values, time shifts and physical-origin labels exist **only in isolated test databases**. No real meter accuracy, live token, hosted bill or physical power-control result is claimed. The website simulator stays off in network tests.
 
 ## Reproduce the required checks

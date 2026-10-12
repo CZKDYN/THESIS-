@@ -124,8 +124,10 @@ def load(path: str | Path) -> Config:
         for device in devices:
             if not isinstance(device.unit_id, int) or isinstance(device.unit_id, bool) or device.unit_id < 1:
                 raise ConfigurationError('Use registered positive unit IDs.')
-            if not all(isinstance(v, str) and 1 <= len(v) <= 64 for v in (device.alias, device.device_id, device.meter_epoch)):
-                raise ConfigurationError('Device identity and epoch must be 1–64 characters.')
+            if not all(isinstance(v, str) and 1 <= len(v) <= maximum for v, maximum in ((device.alias, 64), (device.device_id, 80), (device.meter_epoch, 64))):
+                raise ConfigurationError('Alias/epoch must be 1–64 characters; registered device identity 1–80.')
+            if any(char in device.device_id for char in ('\r', '\n', '\x00')):
+                raise ConfigurationError('Device identities cannot contain header control characters.')
             if mode == 'real' and device.device_id.startswith('DEV-'):
                 raise ConfigurationError('Development identities cannot be used in real mode.')
             if enabled and not device.token_file:

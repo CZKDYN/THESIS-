@@ -1,0 +1,45 @@
+{
+  "software_fixtures_only": true,
+  "rooms": 3,
+  "seed_readings": 9999,
+  "platform": "linux",
+  "dashboard": {
+    "samples": 20,
+    "median_ms": 11.908,
+    "p95_ms": 22.118,
+    "max_ms": 29.132,
+    "queries_min": 11,
+    "queries_max": 11
+  },
+  "ingestion": {
+    "samples": 60,
+    "median_ms": 84.448,
+    "p95_ms": 107.763,
+    "max_ms": 131.927,
+    "accepted": 60,
+    "expected_transactions": 60
+  },
+  "query_plan": [
+    "Limit  (cost=0.28..4.66 rows=1 width=12) (actual time=0.016..0.016 rows=1 loops=1)",
+    "  ->  Index Scan Backward using reading_time_unique on meter_readings  (cost=0.28..48.47 rows=11 width=12) (actual time=0.016..0.016 rows=1 loops=1)",
+    "        Index Cond: (device_id = 1)",
+    "Planning Time: 0.057 ms",
+    "Execution Time: 0.022 ms"
+  ],
+  "queue_enqueue": {
+    "rows": 20000,
+    "samples": 20000,
+    "median_ms": 0.286,
+    "p95_ms": 0.563,
+    "max_ms": 5.335
+  },
+  "queue_claim": {
+    "samples": 100,
+    "median_ms": 0.038,
+    "p95_ms": 0.06,
+    "max_ms": 0.278
+  },
+  "unsent_after_claims": 19900,
+  "process_cpu_seconds": 12.968,
+  "peak_process_rss_mib": 130.125
+}

@@ -439,3 +439,39 @@ def test_provider_transport_does_not_follow_redirects_or_forward_credentials():
         assert error.value.code==302 and received==[]
     finally:
         server.shutdown();server.server_close();thread.join(timeout=2)
+
+
+@pytest.mark.parametrize('raw', [b'{}', b'{"id":""}', b'{"id":true}', b'[]', b'x'*16385, b'['*4096+b']'*4096])
+def test_resend_malformed_acceptance_is_transient_not_sent(app, monkeypatch, raw):
+    configure(app)
+    app.config.update(EMAIL_BACKEND='resend', RESEND_API_KEY='MockOnlyNeverRealProviderKey')
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self, limit): return raw
+    monkeypatch.setattr('dormenergy.services.emailing._resend_http', lambda request, timeout: Response())
+    with app.app_context():
+        with pytest.raises(DeliveryError) as error:
+            resend_send(dict(to='tenant@example.test',subject='Notice',html='Notice',text='Notice'), 'stable-key')
+        assert error.value.code == 'provider_temporary' and error.value.transient
+
+
+@pytest.mark.parametrize('failure', ['rate_limit', 'timeout', 'partial_body'])
+def test_resend_rate_limit_timeout_and_partial_body_are_retryable(app, monkeypatch, failure):
+    import http.client
+    configure(app)
+    app.config.update(EMAIL_BACKEND='resend', RESEND_API_KEY='MockOnlyNeverRealProviderKey')
+    def transport(request, timeout):
+        if failure == 'rate_limit':
+            raise urllib.error.HTTPError(request.full_url,429,'mock-only',{},None)
+        if failure == 'timeout': raise TimeoutError('mock-only')
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def read(self, limit): raise http.client.IncompleteRead(b'partial', 20)
+        return Response()
+    monkeypatch.setattr('dormenergy.services.emailing._resend_http', transport)
+    with app.app_context():
+        with pytest.raises(DeliveryError) as error:
+            resend_send(dict(to='tenant@example.test',subject='Notice',html='Notice',text='Notice'), 'stable-key')
+        assert error.value.transient and error.value.code == 'provider_temporary'

@@ -49,7 +49,7 @@ def parse_timestamp(value):
         if timestamp.tzinfo is None:
             raise ValueError()
         timestamp = timestamp.astimezone(timezone.utc)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         raise DomainError('timestamp must be an ISO 8601 date with a timezone.') from None
     if timestamp > utcnow() + timedelta(minutes=2):
         raise DomainError('timestamp cannot be in the future.')
@@ -82,7 +82,7 @@ def charge_for_interval(delta, start, end):
     return cost.quantize(MONEY_PRECISION, rounding=ROUND_HALF_UP), rate
 
 
-def ingest_reading(device_id, payload, source):
+def ingest_reading(device_id, payload, source, authenticated_token_hash=None):
     if not isinstance(payload, dict):
         raise DomainError('A JSON object is required.')
     device = db.session.get(Device, device_id)
@@ -91,7 +91,9 @@ def ingest_reading(device_id, payload, source):
     unit = lock_unit(device.unit_id)
     device = db.session.scalar(select(Device).where(Device.id == device_id).with_for_update()
                                .execution_options(populate_existing=True))
-    if payload.get('device_id') != device.identifier or payload.get('unit_id') != device.unit_id:
+    if authenticated_token_hash is not None and device.token_hash != authenticated_token_hash:
+        raise DomainError('Device credential changed before this reading could be stored.', 401, 'device_authentication_failed')
+    if payload.get('device_id') != device.identifier or type(payload.get('unit_id')) is not int or payload.get('unit_id') != device.unit_id:
         raise DomainError('Device and unit must match the registered device.', 403, 'device_mapping_invalid')
     event_id, epoch = payload.get('event_id'), payload.get('meter_epoch')
     if not isinstance(event_id, str) or not 1 <= len(event_id) <= 64 or not isinstance(epoch, str) or not 1 <= len(epoch) <= 64:
@@ -101,10 +103,16 @@ def ingest_reading(device_id, payload, source):
     timestamp = parse_timestamp(payload.get('timestamp'))
     if device.last_timestamp and timestamp <= aware(device.last_timestamp):
         raise DomainError('Readings must be synchronized in timestamp order.', 409, 'timestamp_order_conflict')
-    energy = decimal_value(payload.get('energy_kwh'), 'energy_kwh').quantize(MONEY_PRECISION)
-    voltage = decimal_value(payload.get('voltage'), 'voltage', Decimal('300'))
-    current = decimal_value(payload.get('current'), 'current', Decimal('100'))
-    power = decimal_value(payload.get('power_w'), 'power_w', Decimal('25000'))
+    def measured(field, maximum, precision):
+        value = decimal_value(payload.get(field), field, Decimal(maximum))
+        normalized = value.quantize(Decimal(precision))
+        if value != normalized:
+            raise DomainError(f'{field} has more precision than the stored measurement supports.')
+        return normalized
+    energy = measured('energy_kwh', '1000000000', '.000001')
+    voltage = measured('voltage', '300', '.001')
+    current = measured('current', '100', '.0001')
+    power = measured('power_w', '25000', '.001')
     status = payload.get('connection_status')
     if status not in ('connected', 'disconnected', 'protective_trip', 'unknown'):
         raise DomainError('Invalid connection_status.')

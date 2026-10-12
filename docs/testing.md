@@ -1,5 +1,7 @@
 # Software validation record
 
+The following utility/email records describe earlier releases. For the current unmerged stabilization branch, use [the fresh audit test record](software-validation.md), [audit findings/ratings](software-audit.md) and [release checklist](release-readiness.md). Historical pass counts do not substitute for the new branch's results.
+
 Validated on 12 October 2026 (Asia/Manila). These are software checks in isolated local databases, not physical-meter tests or research accuracy claims.
 
 | Check | Result |

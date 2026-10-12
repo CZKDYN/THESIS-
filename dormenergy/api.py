@@ -6,10 +6,11 @@ from decimal import Decimal
 from functools import wraps
 from uuid import uuid4
 from zoneinfo import ZoneInfo
-from flask import Blueprint, Response, abort, current_app, jsonify, request
+from flask import Blueprint, Response, abort, current_app, jsonify, request, session
 from flask_login import current_user, login_required
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
 from werkzeug.security import generate_password_hash
 from .extensions import db
 from .models import Account, AuditLog, Device, DeviceEvent, EmailOutbox, ForecastJob, LoadRequest, Notification, Rate, Reading, Transaction, Unit, User, utcnow
@@ -24,7 +25,10 @@ MANILA = ZoneInfo('Asia/Manila')
 
 
 def json_payload():
-    payload = request.get_json(silent=True)
+    try:
+        payload = request.get_json(silent=True)
+    except RecursionError:
+        raise DomainError('A valid JSON object is required.') from None
     if not isinstance(payload, dict):
         raise DomainError('A JSON object is required.')
     return payload
@@ -41,7 +45,7 @@ def admin_required(function):
 
 
 def scoped_units(include_archived=False, include_demo=False):
-    query = select(Unit).order_by(Unit.id)
+    query = select(Unit).options(selectinload(Unit.device), selectinload(Unit.account)).order_by(Unit.id)
     if not current_app.config['SIMULATION_MODE'] and not include_demo:
         query = query.where(Unit.is_demo.is_(False))
     if not include_archived:
@@ -79,13 +83,25 @@ def load_json(item):
                 note=item.note, timestamp=iso(item.created_at))
 
 
-def unit_json(unit):
+def snapshot_context(units):
+    """Batch per-unit lookups; reuse the existing device/time unique index."""
+    ids = [unit.id for unit in units]
+    device_ids = [unit.device.id for unit in units if unit.device]
+    latest_id = select(Reading.id).where(Reading.device_id == Device.id).order_by(Reading.timestamp.desc()).limit(1).correlate(Device).scalar_subquery()
+    latest_ids = select(latest_id).select_from(Device).where(Device.id.in_(device_ids))
+    readings = db.session.scalars(select(Reading).where(Reading.id.in_(latest_ids))).all() if device_ids else []
+    tenants = db.session.scalars(select(User).where(User.unit_id.in_(ids), User.role == 'tenant', User.tenancy_ended_at.is_(None))).all() if ids else []
+    return {'readings': {row.device_id: row for row in readings}, 'tenants': {row.unit_id: row for row in tenants}}
+
+
+def unit_json(unit, context=None):
     device, account = unit.device, unit.account
-    latest = db.session.scalar(select(Reading).where(Reading.device_id == device.id).order_by(Reading.timestamp.desc()).limit(1)) if device else None
-    recent = bool(device and device.last_seen and (utcnow() - aware(device.last_seen)).total_seconds() < 30)
-    fresh = bool(latest and (utcnow() - aware(latest.timestamp)).total_seconds() < 90)
+    latest = (context['readings'].get(device.id) if context is not None else db.session.scalar(select(Reading).where(Reading.device_id == device.id).order_by(Reading.timestamp.desc()).limit(1))) if device else None
+    now = utcnow()
+    recent = bool(device and device.last_seen and 0 <= (now - aware(device.last_seen)).total_seconds() < 30)
+    fresh = bool(latest and 0 <= (now - aware(latest.timestamp)).total_seconds() < 90)
     online = recent and fresh and not unit.archived_at
-    tenant = current_tenant(unit.id)
+    tenant = context['tenants'].get(unit.id) if context is not None else current_tenant(unit.id)
     invitation,delivery=invitation_status(tenant) if tenant else (None,None)
     return dict(id=unit.id, name=unit.name, room=unit.room, archived_at=iso(unit.archived_at), tenant=tenant.name if tenant else 'Unassigned',
                 balance=str(account.balance) if account else '0', threshold=str(account.low_threshold) if account else '100',
@@ -125,7 +141,8 @@ def snapshot():
     ids = [u.id for u in units]
     devices = [u.device.id for u in units if u.device]
     now = utcnow()
-    unitdata = [unit_json(u) for u in units]
+    context = snapshot_context(units)
+    unitdata = [unit_json(u, context) for u in units]
     local_now = now.astimezone(MANILA)
     hours = [(local_now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=23-i)) for i in range(24)]
     days = [(local_now.date() - timedelta(days=6-i)) for i in range(7)]
@@ -185,6 +202,10 @@ def create_load_request():
     if current_user.role != 'tenant':
         abort(403)
     lock_unit(current_user.unit_id)
+    actor = db.session.scalar(select(User).where(User.id == current_user.id).with_for_update().execution_options(populate_existing=True))
+    if (not actor.active or actor.activation_status != 'active' or actor.tenancy_ended_at or actor.must_change_password
+            or session.get('auth_version') != actor.session_version):
+        raise DomainError('Your tenancy or sign-in session changed. Sign in again.', 403)
     payload = json_payload()
     amount = decimal_value(payload.get('amount'), 'amount', Decimal('100000'))
     if amount < 10 or amount != amount.quantize(Decimal('0.01')):

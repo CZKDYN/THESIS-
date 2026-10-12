@@ -2,6 +2,7 @@
 import base64
 import hashlib
 import json
+import http.client
 import secrets
 import urllib.error
 import urllib.request
@@ -286,13 +287,14 @@ def resend_send(payload, message_key):
                  'Idempotency-Key':message_key,'User-Agent':'DormEnergy/1.0'})
     try:
         with _resend_http(request,timeout=10) as response:
-            data=json.loads(response.read(16384))
-        if not isinstance(data,dict) or not isinstance(data.get('id'),str) or len(data['id'])>128:
+            raw=response.read(16385)
+            data=json.loads(raw) if len(raw)<=16384 else None
+        if not isinstance(data,dict) or not isinstance(data.get('id'),str) or not data['id'].strip() or len(data['id'])>128:
             raise DeliveryError('provider_temporary',True)
         return data['id']
     except urllib.error.HTTPError as error:
         raise DeliveryError('provider_temporary' if error.code in (408,429) or error.code>=500 else 'provider_rejected',error.code in (408,429) or error.code>=500) from None
-    except (urllib.error.URLError,TimeoutError,OSError,ValueError):
+    except (urllib.error.URLError,TimeoutError,OSError,ValueError,RecursionError,http.client.HTTPException):
         raise DeliveryError('provider_temporary',True) from None
 
 

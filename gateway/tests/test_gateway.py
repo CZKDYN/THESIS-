@@ -170,7 +170,7 @@ def test_delivery_states(config, journal, response, expected):
 
 @pytest.mark.parametrize('changed,receipt_status,expected', [
     ({}, 200, 'sent'), ({'energy_kwh': '999'}, 200, 'blocked_conflict'),
-    ({'unit_id': 2}, 200, 'blocked_conflict'), ({}, 404, 'blocked_conflict'),
+    ({'unit_id': 2}, 200, 'blocked_conflict'), ({'unit_id': True}, 200, 'blocked_conflict'), ({}, 404, 'blocked_conflict'),
     ({}, 503, 'pending'), ({}, 401, 'blocked_auth'),
 ])
 def test_409_requires_exact_scoped_receipt(config, journal, changed, receipt_status, expected):
@@ -286,6 +286,51 @@ def test_valid_configuration_and_secret_permissions(config, tmp_path):
     if __import__('os').name != 'nt':
         config.mqtt_password_file.chmod(0o644)
         with pytest.raises(ConfigurationError): secret(config.mqtt_password_file)
+
+
+def test_backend_identifier_length_contract_and_header_safety(config, tmp_path):
+    data = configuration_dict(config)
+    data['devices'][0]['device_id'] = 'D'*80
+    path = tmp_path/'config.json'; path.write_text(json.dumps(data))
+    assert load(path).devices[0].device_id == 'D'*80
+    data['devices'][0]['device_id'] = 'device\r\ninjected'
+    path.write_text(json.dumps(data))
+    with pytest.raises(ConfigurationError): load(path)
+
+
+@pytest.mark.parametrize('raw', [b'{"accepted":true}', b'[]', b'{' , b'['*4096+b']'*4096, b'x'*65537])
+def test_malformed_cloud_response_is_retained_for_retry(config, journal, raw):
+    class Transport:
+        def open(self, request, timeout):
+            class Reply:
+                code = 201
+                def __enter__(self): return self
+                def __exit__(self, *args): pass
+                def read(self, limit): return raw
+            return Reply()
+    cloud = Cloud(config); cloud.opener = Transport()
+    journal.enqueue(item(config))
+    Synchronizer(config, journal, Clock('isolated_test'), cloud).step()
+    assert journal.health()['queue_states'] == {'pending': 1}
+
+
+def test_partial_cloud_body_is_retryable_and_does_not_crash(config, journal):
+    import http.client
+    class Reply:
+        code = 201
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self, limit): raise http.client.IncompleteRead(b'partial', 10)
+    cloud = Cloud(config)
+    cloud.opener = SimpleNamespace(open=lambda *args, **kwargs: Reply())
+    journal.enqueue(item(config))
+    Synchronizer(config, journal, Clock('isolated_test'), cloud).step()
+    assert journal.health()['queue_states'] == {'pending': 1}
+
+
+def test_timestamp_timezone_overflow_is_validation_error(config):
+    with pytest.raises(InvalidMeasurement):
+        item(config, timestamp='0001-01-01T00:00:00+14:00')
 
 
 def test_callback_failure_stops_service_without_secret_logs(config, journal, caplog):

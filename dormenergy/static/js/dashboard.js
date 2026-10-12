@@ -110,7 +110,7 @@ function renderForecast(data) {
   const report = data.model;
   $('#forecast-errors').textContent = report ? `${num(report.test.mae,4)} / ${num(report.test.rmse,4)} kWh` : 'Not evaluated';
   $('#forecast-mape').textContent = report ? `MAPE ${report.test.mape === null?'not defined':num(report.test.mape,1)+'%'} · ${report.test.mape_zero_excluded} zero hours excluded` : '';
-  $('#forecast-model-note').textContent = report ? `${report.evaluation} · Trained ${date(report.trained_at)} · ${report.coverage.complete_hours} covered hours.` : 'Training uses earlier consumption. Historical evaluation uses later, held-out hours.';
+  $('#forecast-model-note').textContent = report ? `${report.evaluation} · Trained ${date(report.trained_at)} · ${report.coverage.complete_hours} covered hours.${data.model_age?.retraining_due?' Retraining is due; fresh covered data is required.':''}` : 'Training uses earlier consumption. Historical evaluation uses later, held-out hours.';
   $('#forecast-future-card').hidden = !data.points.length;
   $('#forecast-test-card').hidden = !report;
   if (view !== 'forecast') return;
@@ -126,7 +126,9 @@ function renderForecast(data) {
     $('#forecast-test-window').textContent = `${date(report.splits.test.start)} – ${date(report.splits.test.end)} · ${report.test.samples} held-out hours (showing ${report.comparison.length}) · ${data.synthetic?'synthetic observations':'hardware observations'}`;
     const persistence = report.baselines.persistence;
     const seasonal = report.baselines.seasonal_24h;
-    $('#forecast-baselines').textContent = `Baseline MAE: previous hour ${num(persistence.mae,4)} kWh (${persistence.samples} hours)${seasonal?`; same hour yesterday ${num(seasonal.mae,4)} kWh (${seasonal.samples} hours)`:''}. Lower is better. These metrics evaluate the next hour; recursive multi-hour error has not been evaluated.`;
+    const backtest = report.recursive_backtest;
+    const recursive = backtest?.status === 'evaluated' ? Object.entries(backtest.horizons).filter(([,r])=>r).map(([h,r])=>`${h}h: endpoint MAE ${num(r.endpoint.mae,4)}, cumulative MAE ${num(r.cumulative.mae,4)} kWh; persistence ${num(r.persistence.cumulative.mae,4)}${r.seasonal_24h?`, seasonal ${num(r.seasonal_24h.cumulative.mae,4)}`:''} (${r.cumulative.samples} origins)`).join(' · ') : 'Recursive multi-hour evaluation needs contiguous held-out history or model retraining.';
+    $('#forecast-baselines').textContent = `Next-hour baseline MAE: previous hour ${num(persistence.mae,4)} kWh (${persistence.samples} hours)${seasonal?`; same hour yesterday ${num(seasonal.mae,4)} kWh (${seasonal.samples} hours)`:''}. Lower is better. ${recursive} No calibrated confidence intervals.`;
     if (!forecastTestChart) {
       const config=chartConfiguration(series,$('#forecast-test-chart'),'Observed kWh');
       config.data.datasets[0].fill=false;

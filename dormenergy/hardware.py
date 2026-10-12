@@ -33,7 +33,7 @@ def readings():
         return jsonify(error='Development gateway fixtures are forbidden on this deployment.',
                        error_code='development_fixture_forbidden'), 403
     try:
-        reading = ingest_reading(device.id, payload, 'hardware')
+        reading = ingest_reading(device.id, payload, 'hardware', authenticated_token_hash=device.token_hash)
         db.session.commit()
         return jsonify(id=reading.id, accepted=True, delta_kwh=str(reading.delta_kwh)), 201
     except DomainError as error:

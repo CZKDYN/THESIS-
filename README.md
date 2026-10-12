@@ -34,7 +34,7 @@ Build: `pip install -r requirements.lock.txt`. Start: `bash scripts/start-render
 - Measurement freshness, consumption charts, connectivity/status monitoring, and database aggregation of historical readings for dashboard refreshes.
 - Per-unit CPU XGBoost training jobs, chronological held-out evaluation, baselines, stored hourly predictions, comparison charts, and horizon-limited credit-duration estimates.
 
-Activation and recovery pages need JavaScript to keep secret links out of server URLs. Physical meters/gateway firmware must be connected separately. Monitoring does not send physical breaker commands. XGBoost requires at least **720 covered hourly observations** from the actual unit; it cannot supply real forecasts before data exist. Forecast metrics are measured next-hour errors, not a guarantee of 24-hour accuracy or shutoff time.
+Activation and recovery pages need JavaScript to keep secret links out of server URLs. Physical meters/gateway firmware must be connected separately. Monitoring does not send physical breaker commands. XGBoost requires at least **720 covered hourly observations** from the actual unit; it cannot supply real forecasts before data exist. Historical next-hour and recursive multi-hour errors are reported with baselines; they do not guarantee future accuracy or shutoff time.
 
 ## Email onboarding and notifications
 
@@ -118,4 +118,8 @@ On PowerShell, set `$env:TEST_DATABASE_URL`. Portable tests can use temporary SQ
 
 Read [API contract](docs/api.md), [forecasting methods](docs/forecasting.md), [deployment instructions](docs/deployment.md), and [assumptions](docs/assumptions.md). The intended meter chain is PZEM-004T → ESP32 → Raspberry Pi gateway → HTTPS API → PostgreSQL → dashboard.
 
-Remaining work outside the web workflows includes physical firmware/gateway installation, gateway retry storage, calibrated measurement trials, real-data forecast backtests, backup/load testing, and any separately designed physical breaker control. No thesis PDF was provided; experimental procedures must be reconciled with the actual Chapter 3 specification.
+Remaining work outside the web workflows includes physical firmware/gateway installation, calibrated measurement trials, representative real-data forecast studies, hosted endurance/capacity testing, and any separately designed physical breaker control. Durable gateway retry storage and isolated backup/recovery checks are implemented. No thesis PDF was provided; experimental procedures must be reconciled with the actual Chapter 3 specification.
+
+## Stabilization review
+
+The unmerged `feature/software-stabilization` branch integrates the gateway and website and adds measured correctness/security/performance fixes. Gateway package version: **0.1.1**. See the [audit and engineering ratings](docs/software-audit.md), [test/failure-scenario record](docs/software-validation.md), [committed measurement evidence](docs/audit-evidence/), and [controlled release/rollback checklist](docs/release-readiness.md). Review this branch and its checks before merging or deploying; a branch push does not deploy Render.

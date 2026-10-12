@@ -182,3 +182,57 @@ def test_worker_marks_interrupted_training_failed(app):
         forecast_worker_step()
         recovered = db.session.get(ForecastJob, job_id)
         assert recovered.status == 'failed' and 'interrupted' in recovered.message
+
+
+def test_rolling_recursive_backtest_has_no_future_inputs(monkeypatch):
+    import dormenergy.services.forecasting as forecasting
+    start=floor_hour(utcnow())-200*HOUR
+    observed={start+i*HOUR:float(i%5+1) for i in range(160)}
+    captured=[]
+    def predict(booster,hour,past,iteration):
+        assert all(key<hour for key in past)
+        value=past[hour-HOUR]+.01
+        if len(captured) % 24:
+            previous_hour,previous_prediction=captured[-1]
+            if hour==previous_hour+HOUR:
+                assert past[previous_hour]==previous_prediction
+        else:
+            assert past[hour-HOUR] == observed[hour-HOUR]
+        captured.append((hour,value));return value
+    monkeypatch.setattr(forecasting,'predict_hour',predict)
+    result=forecasting.recursive_backtest(None,observed,[start+i*HOUR for i in range(100,160)],0)
+    assert result['status']=='evaluated' and len(result['origins'])==2
+    for horizon in ('1','6','12','24'):
+        entry=result['horizons'][horizon]
+        assert entry['endpoint']['samples']==2 and entry['cumulative']['samples']==2
+        assert entry['seasonal_24h']['endpoint']['samples']==2
+    observed.pop(start+110*HOUR)
+    missing=forecasting.recursive_backtest(None,observed,[start+100*HOUR],0)
+    assert missing['status']=='insufficient_contiguous_test_history' and missing['skipped_missing_origins']==1
+
+
+def test_model_age_expires_current_predictions_and_requests_retraining(app):
+    now=history(app)
+    with app.app_context():
+        model=train_model(2,now=now)
+        assert model.metadata_json['recursive_backtest']['status']=='evaluated'
+        generate_forecasts(2,now=now)
+        model.trained_at=now-timedelta(days=31);db.session.commit()
+        payload=forecast_payload(db.session.get(Unit,2),now=now)
+        assert payload['status']=='stale_model' and payload['points']==[] and payload['remaining_duration'] is None
+        assert payload['model_age']['retraining_due']
+        with pytest.raises(DomainError,match='age limit'):
+            generate_forecasts(2,now=now)
+
+
+def test_metrics_reject_empty_mismatched_and_nonfinite_pairs():
+    for actual,predicted in (([],[]),([1],[1,2]),([1],[float('nan')])):
+        with pytest.raises(ValueError):metrics(actual,predicted)
+
+
+@pytest.mark.parametrize('estimate', [float('nan'), float('inf'), float('-inf')])
+def test_nonfinite_forecast_is_rejected_before_nonnegative_clipping(estimate):
+    from dormenergy.services.forecasting import predict_hour
+    booster = SimpleNamespace(predict=lambda *args, **kwargs: [estimate])
+    with pytest.raises(DomainError, match='invalid forecast'):
+        predict_hour(booster, floor_hour(utcnow()), {}, 0)

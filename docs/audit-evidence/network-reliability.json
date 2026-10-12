@@ -1,0 +1,40 @@
+{
+  "software_fixtures_only": true,
+  "rooms": 3,
+  "accepted_readings": 174,
+  "consumption_transactions": 171,
+  "duplicate_billing_incidents": 0,
+  "final_unreconciled_readings": 0,
+  "delivery_percent": 100,
+  "elapsed_seconds": 129.343,
+  "cloud_outage_seconds": 60.128,
+  "process_cpu_seconds": 19.401,
+  "peak_process_rss_mib": 135.473,
+  "unexpected_worker_failures": 0,
+  "intentional_process_kills": 1,
+  "recovery_seconds": {
+    "credential_rotation": 1.508,
+    "tariff_restored": 1.707,
+    "database_restored": 2.009,
+    "https_path_restored": 1.708,
+    "malformed_response_repaired": 2.112,
+    "sigkill_restart": 1.609,
+    "stress_wave_1": 1.105,
+    "stress_wave_2": 2.11,
+    "stress_wave_3": 2.013,
+    "stress_wave_4": 1.106,
+    "stress_wave_5": 1.105,
+    "stress_wave_6": 2.011,
+    "stress_wave_7": 1.105,
+    "stress_wave_8": 1.206,
+    "stress_wave_9": 2.216,
+    "stress_wave_10": 2.111
+  },
+  "https_post": {
+    "samples": 196,
+    "median_ms": 90.923,
+    "p95_ms": 112.563
+  },
+  "database_failure": "Scoped SQLAlchemy OperationalError injection; native shared database daemon was not stopped.",
+  "internet_failure": "Loopback HTTPS listener removed and restored; no physical WAN outage claimed."
+}

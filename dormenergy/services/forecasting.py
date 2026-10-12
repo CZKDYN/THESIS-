@@ -95,12 +95,79 @@ def training_samples(history):
 
 
 def metrics(actual, predicted):
+    if not len(actual) or len(actual) != len(predicted) or not all(math.isfinite(float(value)) for value in [*actual, *predicted]):
+        raise ValueError('Metrics require equal, nonempty finite observation/prediction pairs.')
     differences = [float(p)-float(a) for a, p in zip(actual, predicted)]
     nonzero = [(float(a), float(p)) for a, p in zip(actual, predicted) if abs(float(a)) > 1e-9]
     return dict(mae=sum(abs(d) for d in differences)/len(differences),
                 rmse=math.sqrt(sum(d*d for d in differences)/len(differences)),
                 mape=100*sum(abs(p-a)/abs(a) for a, p in nonzero)/len(nonzero) if nonzero else None,
                 samples=len(differences), mape_zero_excluded=len(differences)-len(nonzero))
+
+
+def predict_hour(booster, hour, history, best_iteration):
+    """The same bounded recursive prediction path is used in evaluation and issuance."""
+    import numpy as np
+    import xgboost as xgb
+    vector = xgb.DMatrix(np.asarray([features(hour, history)], dtype=np.float32), feature_names=FEATURES, nthread=1)
+    value = float(booster.predict(vector, iteration_range=(0, best_iteration+1))[0])
+    if not math.isfinite(value) or value > 25:
+        raise DomainError('Model produced an invalid forecast; no forecast was stored.')
+    return max(0.0, value)
+
+
+def recursive_backtest(booster, history, test_hours, best_iteration, max_origins=8):
+    """Fixed selected model, rolling held-out origins; no actual future becomes an input."""
+    horizons = (1, 6, 12, 24)
+    groups = {str(h): {'actual': [], 'predicted': [], 'actual_sum': [], 'predicted_sum': [],
+                       'persistence': [], 'persistence_sum': [], 'seasonal': [], 'seasonal_actual': [],
+                       'seasonal_sum': [], 'seasonal_actual_sum': []} for h in horizons}
+    origins = []; skipped = 0
+    for origin in test_hours:
+        if origins and origin-origins[-1] < 24*HOUR:
+            continue
+        if origin-HOUR not in history or any(origin+step*HOUR not in history for step in range(24)):
+            skipped += 1; continue
+        past = {hour: value for hour, value in history.items() if hour < origin}
+        estimates = []
+        for step in range(24):
+            hour = origin+step*HOUR
+            value = predict_hour(booster, hour, past, best_iteration)
+            past[hour] = value; estimates.append(value)
+        for horizon in horizons:
+            group = groups[str(horizon)]
+            actual = [history[origin+step*HOUR] for step in range(horizon)]
+            group['actual'].append(actual[-1]); group['predicted'].append(estimates[horizon-1])
+            group['actual_sum'].append(sum(actual)); group['predicted_sum'].append(sum(estimates[:horizon]))
+            baseline = history[origin-HOUR]
+            group['persistence'].append(baseline); group['persistence_sum'].append(baseline*horizon)
+            seasonal = [history.get(origin+(step-24)*HOUR) for step in range(horizon)]
+            if all(value is not None for value in seasonal):
+                group['seasonal'].append(seasonal[-1]); group['seasonal_actual'].append(actual[-1])
+                group['seasonal_sum'].append(sum(seasonal)); group['seasonal_actual_sum'].append(sum(actual))
+        origins.append(origin)
+        if len(origins) >= max_origins:
+            break
+    result = dict(protocol='Fixed training/validation-selected model, rolling held-out origins at least 24 hours apart. '
+                          'Future actual values are used only for scoring; recursive lag inputs use predictions.',
+                  status='evaluated' if origins else 'insufficient_contiguous_test_history',
+                  origins=[hour.isoformat() for hour in origins], origins_limit=max_origins, skipped_missing_origins=skipped,
+                  uncertainty='No confidence intervals: limited held-out origins are not a calibrated uncertainty model.', horizons={})
+    for horizon, group in groups.items():
+        if not group['actual']:
+            result['horizons'][horizon] = None; continue
+        result['horizons'][horizon] = dict(endpoint=metrics(group['actual'], group['predicted']),
+            cumulative=metrics(group['actual_sum'], group['predicted_sum']),
+            persistence=dict(endpoint=metrics(group['actual'], group['persistence']), cumulative=metrics(group['actual_sum'], group['persistence_sum'])),
+            seasonal_24h=dict(endpoint=metrics(group['seasonal_actual'], group['seasonal']), cumulative=metrics(group['seasonal_actual_sum'], group['seasonal_sum'])) if group['seasonal'] else None)
+    return result
+
+
+def model_age(model, now):
+    days = max(0.0, (now-aware(model.trained_at)).total_seconds()/86400)
+    return dict(days=round(days, 3), retraining_due=days >= current_app.config['FORECAST_RETRAIN_DAYS'],
+                expired=days >= current_app.config['FORECAST_MAX_MODEL_DAYS'],
+                retrain_days=current_app.config['FORECAST_RETRAIN_DAYS'], maximum_days=current_app.config['FORECAST_MAX_MODEL_DAYS'])
 
 
 def latest_model(unit):
@@ -130,9 +197,9 @@ def train_model(unit_id, actor_id=None, now=None):
                           f'{source} data for this unit; found {len(history)} covered hours.')
     train_end, validation_end = int(len(hours)*0.6), int(len(hours)*0.8)
     x, y = np.asarray(vectors, dtype=np.float32), np.asarray(targets, dtype=np.float32)
-    train = xgb.DMatrix(x[:train_end], label=y[:train_end], feature_names=FEATURES)
-    validation = xgb.DMatrix(x[train_end:validation_end], label=y[train_end:validation_end], feature_names=FEATURES)
-    test = xgb.DMatrix(x[validation_end:], feature_names=FEATURES)
+    train = xgb.DMatrix(x[:train_end], label=y[:train_end], feature_names=FEATURES, nthread=1)
+    validation = xgb.DMatrix(x[train_end:validation_end], label=y[train_end:validation_end], feature_names=FEATURES, nthread=1)
+    test = xgb.DMatrix(x[validation_end:], feature_names=FEATURES, nthread=1)
     best, best_mae, best_depth = None, float('inf'), None
     for depth in (2, 4):
         candidate = xgb.train(dict(objective='reg:squarederror', eval_metric='mae',
@@ -158,10 +225,12 @@ def train_model(unit_id, actor_id=None, now=None):
                   coverage=coverage, splits=splits, best_iteration=best.best_iteration,
                   max_depth=best_depth, validation_mae=best_mae, test=metrics(actual, predicted),
                   baselines=dict(persistence=persistence, seasonal_24h=seasonal),
+                  recursive_backtest=recursive_backtest(best, history, hours[validation_end:], best.best_iteration),
                   comparison=[dict(timestamp=hour.isoformat(), actual=float(a), predicted=float(p))
                               for hour, a, p in zip(hours[validation_end:], actual, predicted)][-72:],
                   evaluation='Chronological held-out next-hour predictions. Later actual observations '
-                             'may become inputs only for subsequent hours. Multi-hour recursive error is not evaluated.')
+                             'may become inputs only for subsequent hours. Separate fixed-model rolling-origin '
+                             '1/6/12/24-hour recursive endpoint and cumulative errors are stored with baseline comparisons.')
     lock_unit(unit_id)  # Recheck removal after CPU work; no billing locks during training.
     model = ForecastModel(unit_id=unit_id, version='xgb-'+uuid4().hex, source=source,
                           model_json=best.save_raw(raw_format='json').decode(), metadata_json=report, trained_at=now)
@@ -173,7 +242,6 @@ def train_model(unit_id, actor_id=None, now=None):
 
 
 def generate_forecasts(unit_id, now=None):
-    import numpy as np
     import xgboost as xgb
 
     now = aware(now or utcnow())
@@ -185,6 +253,8 @@ def generate_forecasts(unit_id, now=None):
         raise DomainError('Train a model for this unit first.', 409)
     if model.source == 'simulation' and not current_app.config['SIMULATION_MODE']:
         raise DomainError('Synthetic forecasting requires simulation mode.', 409)
+    if model_age(model, now)['expired']:
+        raise DomainError('Model age limit reached. Request retraining before new forecasts.', 409)
     origin = floor_hour(now)
     version = f'{model.version}:{origin.strftime("%Y%m%dT%H")}'
     if db.session.scalar(select(Forecast.id).where(Forecast.unit_id == unit_id, Forecast.model_version == version).limit(1)):
@@ -198,10 +268,7 @@ def generate_forecasts(unit_id, now=None):
     # Include a partial current hour for the prorated remaining-credit estimate.
     for step in range(HORIZON + int(now > origin)):
         hour = origin + step*HOUR
-        vector = xgb.DMatrix(np.asarray([features(hour, history)], dtype=np.float32), feature_names=FEATURES)
-        value = max(0.0, float(booster.predict(vector, iteration_range=(0, model.metadata_json['best_iteration']+1))[0]))
-        if not math.isfinite(value) or value > 25:
-            raise DomainError('Model produced an invalid forecast; no forecast was stored.')
+        value = predict_hour(booster, hour, history, model.metadata_json['best_iteration'])
         history[hour] = value
         predictions.append((hour, value))
     lock_unit(unit_id)
@@ -258,6 +325,11 @@ def forecast_payload(unit, now=None):
     if not model:
         return result
     result['model'] = dict(version=model.version, trained_at=aware(model.trained_at).isoformat(), **model.metadata_json)
+    result['model_age'] = model_age(model, now)
+    if result['model_age']['expired']:
+        result.update(status='stale_model', message='Model age limit reached; retrain this unit',
+                      detail='Historical evaluation remains available; stale models do not provide current projections.')
+        return result
     latest = db.session.scalar(select(Forecast).where(
         Forecast.unit_id == unit.id, Forecast.source == model.source,
         Forecast.model_version.startswith(model.version+':'))

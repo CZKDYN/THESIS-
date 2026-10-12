@@ -1,5 +1,7 @@
 # DormEnergy Raspberry Pi gateway
 
+Package 0.1.1 is part of the unmerged `feature/software-stabilization` review. The original gateway scope and evidence below are supplemented by [the integrated audit](../docs/software-audit.md), [fresh validation](../docs/software-validation.md) and [controlled release checklist](../docs/release-readiness.md).
+
 A headless, monitoring-only **MQTT → durable SQLite → authenticated HTTPS** gateway for independent ESP32/PZEM-004T meters. Default development mode collects explicitly labeled local fixtures and **cannot upload**. Actual installation uses explicit real mode, verified TLS, room-specific broker credentials/ACLs and the website's independently scoped device tokens. Python 3.11+ (tested with 3.12).
 
 This is gateway software, not ESP32 firmware or an assembled electrical installation. The firmware must implement [the protocol](docs/esp32-protocol.md), including a durable upstream journal and an application ACK. No relay, breaker, mains GPIO, or automatic cutoff is implemented.

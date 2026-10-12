@@ -1,0 +1,249 @@
+{
+  "software_fixtures_only": true,
+  "source": "simulation",
+  "generated_hourly_intervals": 744,
+  "omitted_observations": 3,
+  "train_wall_seconds": 0.354,
+  "train_cpu_seconds": 0.801,
+  "peak_process_rss_mib": 126.094,
+  "model_json_bytes": 103815,
+  "coverage": {
+    "readings_examined": 742,
+    "complete_hours": 738,
+    "coverage_minimum": 0.95,
+    "maximum_interval_seconds": 5400,
+    "maximum_hourly_kwh": 25
+  },
+  "test": {
+    "mae": 0.053525374798507955,
+    "rmse": 0.06392485891184757,
+    "mape": 16.801737117168287,
+    "samples": 143,
+    "mape_zero_excluded": 0
+  },
+  "baselines": {
+    "persistence": {
+      "mae": 0.016528879429076933,
+      "rmse": 0.018479559620255367,
+      "mape": 5.577476838738814,
+      "samples": 143,
+      "mape_zero_excluded": 0
+    },
+    "seasonal_24h": {
+      "mae": 0.012944141178266377,
+      "rmse": 0.03376611780628786,
+      "mape": 4.255318939069648,
+      "samples": 141,
+      "mape_zero_excluded": 0
+    }
+  },
+  "recursive_backtest": {
+    "protocol": "Fixed training/validation-selected model, rolling held-out origins at least 24 hours apart. Future actual values are used only for scoring; recursive lag inputs use predictions.",
+    "status": "evaluated",
+    "origins": [
+      "2026-10-06T23:00:00+00:00",
+      "2026-10-07T23:00:00+00:00",
+      "2026-10-08T23:00:00+00:00",
+      "2026-10-09T23:00:00+00:00",
+      "2026-10-10T23:00:00+00:00"
+    ],
+    "origins_limit": 8,
+    "skipped_missing_origins": 23,
+    "uncertainty": "No confidence intervals: limited held-out origins are not a calibrated uncertainty model.",
+    "horizons": {
+      "1": {
+        "endpoint": {
+          "mae": 0.014611040997505187,
+          "rmse": 0.03212747373749724,
+          "mape": 5.798032141867138,
+          "samples": 5,
+          "mape_zero_excluded": 0
+        },
+        "cumulative": {
+          "mae": 0.014611040997505187,
+          "rmse": 0.03212747373749724,
+          "mape": 5.798032141867138,
+          "samples": 5,
+          "mape_zero_excluded": 0
+        },
+        "persistence": {
+          "endpoint": {
+            "mae": 0.0065649999999999875,
+            "rmse": 0.0065649999999999875,
+            "mape": 2.6051587301587253,
+            "samples": 5,
+            "mape_zero_excluded": 0
+          },
+          "cumulative": {
+            "mae": 0.0065649999999999875,
+            "rmse": 0.0065649999999999875,
+            "mape": 2.6051587301587253,
+            "samples": 5,
+            "mape_zero_excluded": 0
+          }
+        },
+        "seasonal_24h": {
+          "endpoint": {
+            "mae": 0.014400000000000001,
+            "rmse": 0.03219937887599698,
+            "mape": 5.714285714285715,
+            "samples": 5,
+            "mape_zero_excluded": 0
+          },
+          "cumulative": {
+            "mae": 0.014400000000000001,
+            "rmse": 0.03219937887599698,
+            "mape": 5.714285714285715,
+            "samples": 5,
+            "mape_zero_excluded": 0
+          }
+        }
+      },
+      "6": {
+        "endpoint": {
+          "mae": 0.09258907299995421,
+          "rmse": 0.09268452175405316,
+          "mape": 26.959707950545,
+          "samples": 5,
+          "mape_zero_excluded": 0
+        },
+        "cumulative": {
+          "mae": 0.2965697236061097,
+          "rmse": 0.31654214811906084,
+          "mape": 16.879324052709716,
+          "samples": 5,
+          "mape_zero_excluded": 0
+        },
+        "persistence": {
+          "endpoint": {
+            "mae": 0.08487,
+            "rmse": 0.08487,
+            "mape": 24.712099815103294,
+            "samples": 5,
+            "mape_zero_excluded": 0
+          },
+          "cumulative": {
+            "mae": 0.20561000000000007,
+            "rmse": 0.20561000000000007,
+            "mape": 11.702333523050658,
+            "samples": 5,
+            "mape_zero_excluded": 0
+          }
+        },
+        "seasonal_24h": {
+          "endpoint": {
+            "mae": 0.019624799999999998,
+            "rmse": 0.04388238684483787,
+            "mape": 5.714269075662061,
+            "samples": 5,
+            "mape_zero_excluded": 0
+          },
+          "cumulative": {
+            "mae": 0.10040000000000004,
+            "rmse": 0.224501224940979,
+            "mape": 5.714285714285716,
+            "samples": 5,
+            "mape_zero_excluded": 0
+          }
+        }
+      },
+      "12": {
+        "endpoint": {
+          "mae": 0.007191700043678273,
+          "rmse": 0.007851511331351375,
+          "mape": 2.781389609451501,
+          "samples": 5,
+          "mape_zero_excluded": 0
+        },
+        "cumulative": {
+          "mae": 0.6603750998973847,
+          "rmse": 0.6803508290497439,
+          "mape": 18.282810074678423,
+          "samples": 5,
+          "mape_zero_excluded": 0
+        },
+        "persistence": {
+          "endpoint": {
+            "mae": 0.0,
+            "rmse": 0.0,
+            "mape": 0.0,
+            "samples": 5,
+            "mape_zero_excluded": 0
+          },
+          "cumulative": {
+            "mae": 0.50922,
+            "rmse": 0.50922,
+            "mape": 14.09800664451827,
+            "samples": 5,
+            "mape_zero_excluded": 0
+          }
+        },
+        "seasonal_24h": {
+          "endpoint": {
+            "mae": 0.0,
+            "rmse": 0.0,
+            "mape": 0.0,
+            "samples": 5,
+            "mape_zero_excluded": 0
+          },
+          "cumulative": {
+            "mae": 0.19162480000000004,
+            "rmse": 0.4284860789748018,
+            "mape": 5.3052270210409755,
+            "samples": 5,
+            "mape_zero_excluded": 0
+          }
+        }
+      },
+      "24": {
+        "endpoint": {
+          "mae": 0.007229620518684377,
+          "rmse": 0.0074850052079318856,
+          "mape": 2.796055351143572,
+          "samples": 5,
+          "mape_zero_excluded": 0
+        },
+        "cumulative": {
+          "mae": 1.2544034709930423,
+          "rmse": 1.269213042006322,
+          "mape": 17.36438913334776,
+          "samples": 5,
+          "mape_zero_excluded": 0
+        },
+        "persistence": {
+          "endpoint": {
+            "mae": 0.0,
+            "rmse": 0.0,
+            "mape": 0.0,
+            "samples": 5,
+            "mape_zero_excluded": 0
+          },
+          "cumulative": {
+            "mae": 1.01844,
+            "rmse": 1.01844,
+            "mape": 14.09800664451827,
+            "samples": 5,
+            "mape_zero_excluded": 0
+          }
+        },
+        "seasonal_24h": {
+          "endpoint": {
+            "mae": 0.0,
+            "rmse": 0.0,
+            "mape": 0.0,
+            "samples": 4,
+            "mape_zero_excluded": 0
+          },
+          "cumulative": {
+            "mae": 0.0,
+            "rmse": 0.0,
+            "mape": 0.0,
+            "samples": 4,
+            "mape_zero_excluded": 0
+          }
+        }
+      }
+    }
+  },
+  "forecast_wall_seconds": 0.022
+}

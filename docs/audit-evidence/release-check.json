@@ -1,0 +1,31 @@
+{
+  "software_fixtures_only": true,
+  "mode": "hardware",
+  "worker_exit_supervised": true,
+  "restart": true,
+  "schema_drift_check": true,
+  "backup_restore": true,
+  "real_emails_sent": 0,
+  "automatic_readings": 0,
+  "preserved_table_counts": {
+    "dormitory_units": 1,
+    "users": 0,
+    "devices": 1,
+    "prepaid_accounts": 1,
+    "electricity_rates": 1,
+    "meter_readings": 1,
+    "load_requests": 0,
+    "prepaid_transactions": 1,
+    "forecast_models": 0,
+    "forecast_jobs": 0,
+    "forecasts": 0,
+    "notifications": 0,
+    "device_events": 0,
+    "audit_logs": 1,
+    "account_tokens": 0,
+    "email_outbox": 0,
+    "email_rate_limits": 0
+  },
+  "preserved_fixture_balance": "99.00",
+  "schema_head": "d21ae48f397c"
+}

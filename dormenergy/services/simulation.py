@@ -33,10 +33,10 @@ def simulation_step():
         status = 'protective_trip' if device.unit.power_status == 'protective_trip' else ('connected' if account.balance > 0 else 'disconnected')
         if status != 'connected':
             power = Decimal('0')
-        energy = (device.last_energy or Decimal('0')) + power * Decimal(str(seconds)) / Decimal('3600000')
+        energy = ((device.last_energy or Decimal('0')) + power * Decimal(str(seconds)) / Decimal('3600000')).quantize(Decimal('0.000001'))
         payload = dict(device_id=device.identifier, unit_id=device.unit_id,
                        event_id=f'sim-{now.isoformat()}', meter_epoch=device.meter_epoch or 'demo-1',
-                       timestamp=now.isoformat(), voltage='230.4', current=str(power / Decimal('230.4')),
+                       timestamp=now.isoformat(), voltage='230.4', current=str((power / Decimal('230.4')).quantize(Decimal('0.0001'))),
                        power_w=str(power), energy_kwh=str(energy), connection_status=status)
         ingest_reading(device.id, payload, 'simulation')
         db.session.commit()

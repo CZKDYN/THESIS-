@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS measurements(
  next_attempt REAL NOT NULL DEFAULT 0, error TEXT, received_at REAL NOT NULL, synced_at REAL,
  UNIQUE(alias,event_id));
 CREATE INDEX IF NOT EXISTS pending_order ON measurements(alias,timestamp,id);
+CREATE INDEX IF NOT EXISTS unsent_order ON measurements(alias,timestamp,id) WHERE status!='sent';
 CREATE TABLE IF NOT EXISTS receipts(alias TEXT NOT NULL,event_id TEXT NOT NULL,digest TEXT NOT NULL,
  timestamp REAL NOT NULL,epoch TEXT NOT NULL,energy TEXT NOT NULL,synced_at REAL NOT NULL,
  PRIMARY KEY(alias,event_id));
@@ -102,12 +103,7 @@ CREATE TABLE IF NOT EXISTS rejections(id INTEGER PRIMARY KEY,alias TEXT,category
                 if (pending >= self.config.max_pending or total_bytes >= self.config.max_bytes or
                     shutil.disk_usage(self.config.database.parent).free < self.config.min_free_bytes):
                     raise StorageUnavailable('Local storage limit reached; no reading acknowledgment was sent.')
-                neighbors = '''SELECT timestamp,epoch,energy FROM measurements WHERE alias=?
- UNION SELECT timestamp,epoch,energy FROM receipts WHERE alias=?'''
-                previous = self.db.execute('SELECT * FROM ('+neighbors+') WHERE timestamp<=? ORDER BY timestamp DESC LIMIT 1',
-                                           (alias, alias, measurement.timestamp)).fetchone()
-                following = self.db.execute('SELECT * FROM ('+neighbors+') WHERE timestamp>? ORDER BY timestamp LIMIT 1',
-                                            (alias, alias, measurement.timestamp)).fetchone()
+                previous, following = self.neighbors(alias, measurement.timestamp)
                 approved = self.db.execute('SELECT 1 FROM reset_approvals WHERE alias=? AND epoch=?', (alias, body['meter_epoch'])).fetchone()
                 initial_epoch = measurement.device.meter_epoch
                 if body['meter_epoch'] != initial_epoch and not approved:
@@ -115,8 +111,8 @@ CREATE TABLE IF NOT EXISTS rejections(id INTEGER PRIMARY KEY,alias TEXT,category
                 if previous and previous['epoch'] != body['meter_epoch'] and body.get('reset_confirmed') is not True:
                     raise InvalidMeasurement('reset_confirmation_required')
                 if previous and previous['epoch'] != body['meter_epoch']:
-                    reused = self.db.execute('SELECT 1 FROM ('+neighbors+') WHERE epoch=? AND timestamp<? LIMIT 1',
-                                             (alias, alias, body['meter_epoch'], previous['timestamp'])).fetchone()
+                    reused = any(self.db.execute('SELECT 1 FROM '+table+' WHERE alias=? AND epoch=? AND timestamp<? LIMIT 1',
+                                 (alias, body['meter_epoch'], previous['timestamp'])).fetchone() for table in ('measurements', 'receipts'))
                     if reused:
                         raise InvalidMeasurement('meter_epoch_reused')
                 if previous and previous['timestamp'] == measurement.timestamp:
@@ -143,6 +139,17 @@ CREATE TABLE IF NOT EXISTS rejections(id INTEGER PRIMARY KEY,alias TEXT,category
                             (alias, category, hashlib.sha256(raw).hexdigest(), time.time()))
             self.db.execute('DELETE FROM rejections WHERE id NOT IN (SELECT id FROM rejections ORDER BY id DESC LIMIT 1000)')
 
+    def neighbors(self, alias: str, timestamp: float):
+        # Two index seeks per table, rather than sorting a union of the entire room history.
+        before, after = [], []
+        for table in ('measurements', 'receipts'):
+            previous = self.db.execute('SELECT timestamp,epoch,energy FROM '+table+' WHERE alias=? AND timestamp<=? ORDER BY timestamp DESC LIMIT 1', (alias, timestamp)).fetchone()
+            following = self.db.execute('SELECT timestamp,epoch,energy FROM '+table+' WHERE alias=? AND timestamp>? ORDER BY timestamp LIMIT 1', (alias, timestamp)).fetchone()
+            if previous: before.append(previous)
+            if following: after.append(following)
+        return (max(before, key=lambda row: row['timestamp']) if before else None,
+                min(after, key=lambda row: row['timestamp']) if after else None)
+
     def connection(self, alias: str, online: bool):
         with self.transaction():
             self.db.execute('''INSERT INTO activity(alias,connection,status_at) VALUES(?,?,?)
@@ -152,10 +159,8 @@ CREATE TABLE IF NOT EXISTS rejections(id INTEGER PRIMARY KEY,alias TEXT,category
     def claim(self, now: float | None = None):
         now = time.time() if now is None else now
         with self.transaction():
-            heads = self.db.execute('''SELECT m.* FROM measurements m WHERE m.status!='sent' AND m.id=(
- SELECT n.id FROM measurements n WHERE n.alias=m.alias AND n.status!='sent' ORDER BY n.timestamp,n.id LIMIT 1)
- ORDER BY m.next_attempt,m.timestamp,m.id''').fetchall()
-            for row in heads:
+            heads = [self.db.execute("SELECT * FROM measurements WHERE alias=? AND status!='sent' ORDER BY timestamp,id LIMIT 1", (device.alias,)).fetchone() for device in self.config.devices]
+            for row in sorted((row for row in heads if row), key=lambda row: (row['next_attempt'], row['timestamp'], row['id'])):
                 if row['status'] != 'pending' or row['next_attempt'] > now:
                     continue
                 if row['attempts'] >= self.config.max_attempts:

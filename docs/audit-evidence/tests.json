@@ -1,0 +1,143 @@
+{
+  "recorded_at": "2026-10-12T12:12:43.578307+00:00",
+  "branch": "feature/software-stabilization",
+  "gateway_package": "0.1.1",
+  "baseline_main": "24f6ecf4ff565d7f9ea538c163a5ae8a47d62152",
+  "baseline_gateway": "4c7dc68a6fbd1c4601f143e2f6682f7569b89502",
+  "python": "3.12.14 (main, Aug 25 2026, 14:00:49) [Clang 22.1.3 ]",
+  "platform": "Linux-6.18.44-x86_64-with-glibc2.41",
+  "suites": {
+    "baseline-backend": {
+      "tests": 87,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 87,
+      "seconds": 57.903
+    },
+    "baseline-gateway": {
+      "tests": 59,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 59,
+      "seconds": 0.136
+    },
+    "backend-final": {
+      "tests": 127,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 127,
+      "seconds": 77.112
+    },
+    "portable-final": {
+      "tests": 127,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 9,
+      "passed": 118,
+      "seconds": 68.667
+    },
+    "gateway-final": {
+      "tests": 68,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 68,
+      "seconds": 0.211
+    },
+    "network-final": {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 1,
+      "seconds": 130.087
+    }
+  },
+  "browsers": {
+    "https": {
+      "checks_passed": 8,
+      "checks": [
+        "HTTPS browser login succeeds with secure cookies and its automatic same-origin referrer",
+        "Meralco PHP 14.74 reference is read-only and a forged rate update is rejected without activating billing",
+        "Locked utility rate and pending-confirmation explanation fit a phone layout",
+        "Authenticated HTTPS form saves preferences with strict form protection enabled",
+        "HTTPS activation checks and redeems a fragment link without exposing the token in referrers",
+        "Activated tenant signs in on HTTPS and sees only their unit in a phone layout",
+        "HTTPS password recovery revokes the old session and permits the new password",
+        "All observed URLs/referrers exclude private links and the browser reports no JavaScript errors"
+      ],
+      "errors": [],
+      "real_emails_sent": 0,
+      "secure_cookies": true,
+      "https_strict_csrf": true,
+      "physical_meter_test": false
+    },
+    "forecast": {
+      "checks_passed": 4,
+      "checks": [
+        "Recursive multi-hour metrics and baselines rendered",
+        "Synthetic source and uncertainty limits explicit",
+        "Both forecast charts rendered",
+        "Phone layout and JavaScript error checks passed"
+      ],
+      "errors": [],
+      "real_emails_sent": 0,
+      "production_readings": 0
+    },
+    "real": {
+      "checks_passed": 10,
+      "checks": [
+        "Owner setup and an empty real workspace with no fabricated measurements",
+        "All navigation, unit registration, and unit/threshold editing",
+        "Tenant creation, mandatory private password, and unit isolation",
+        "Actual tariff configuration and tenant request/credit approval",
+        "One-time gateway credentials, authenticated reading ingestion, decimal billing, and CSV export",
+        "XGBoost rejects insufficient real history without inventing predictions or metrics",
+        "Administrator reset, session revocation, tenant turnover, and previous-request privacy",
+        "Unit archive/restore and gateway credential revocation",
+        "Mobile admin/tenant layouts and account profile editing",
+        "No JavaScript or browser console errors"
+      ],
+      "errors": [],
+      "physical_meter_test": false
+    },
+    "email": {
+      "checks_passed": 7,
+      "checks": [
+        "Email-first tenant registration is pending, with explicit test-only delivery status",
+        "Expired invitation state and safe resending through the administrator UI",
+        "Responsive activation, private password, unit isolation, and secrets excluded from request URLs",
+        "Activated tenant status and non-sensitive delivery monitoring",
+        "Mobile notification preferences with essential security emails retained",
+        "Forgot-password link, generic confirmation, administrator recovery, and session revocation",
+        "No JavaScript page errors in the new onboarding and recovery flows"
+      ],
+      "errors": [],
+      "backend": "memory",
+      "real_emails_sent": 0
+    }
+  },
+  "production_readings": 0,
+  "real_emails_sent": 0,
+  "not_executed": [
+    "Hosted GitHub Actions: API Forbidden",
+    "Latest Render deployment verification",
+    "Windows/Python 3.11/Pi ARM",
+    "Docker integration: container DNS blocked",
+    "Physical devices/SD power loss/field Wi-Fi/WAN",
+    "Live Resend/inbox/managed PostgreSQL restore",
+    "24/7 endurance",
+    "Time-based device-token expiry: not implemented"
+  ],
+  "commands": {
+    "backend": "TEST_DATABASE_URL='postgresql+psycopg://agent@/dormenergy_test?host=/workspace/.dormenergy-cloud/pgsocket' .venv/bin/python -m pytest -q tests --junitxml=artifacts/audit/backend-final.xml",
+    "portable": "env -u TEST_DATABASE_URL .venv/bin/python -m pytest -q tests --junitxml=artifacts/audit/portable-final.xml",
+    "gateway": ".venv/bin/python -m pytest -q gateway/tests/test_gateway.py --junitxml=artifacts/audit/gateway-final.xml",
+    "network": "RUN_GATEWAY_E2E=1 RUN_GATEWAY_BROWSER=1 GATEWAY_BROWSER_PYTHON=/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python GATEWAY_CHROMIUM_PATH=/usr/bin/chromium GATEWAY_TEST_DATABASE_URL=postgresql+psycopg://agent@/dormenergy_gateway_test?host=/workspace/.dormenergy-cloud/pgsocket MOSQUITTO_BIN=/workspace/.dormenergy-cloud/mqtt/usr/sbin/mosquitto MOSQUITTO_PASSWD_BIN=/workspace/.dormenergy-cloud/mqtt/usr/bin/mosquitto_passwd LD_LIBRARY_PATH=/workspace/.dormenergy-cloud/mqtt/usr/lib/x86_64-linux-gnu .venv/bin/python -m pytest -q -s gateway/tests/test_end_to_end.py",
+    "browser": "Use Playwright interpreter with scripts/browser_https_smoke.py, browser_forecast_smoke.py, audit_browser_workflows.py; see methods.",
+    "advisories": ".venv/bin/python scripts/check_dependency_advisories.py --output artifacts/audit/dependency-final.json"
+  }
+}

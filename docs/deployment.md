@@ -1,5 +1,7 @@
 # Deploy DormEnergy in real mode
 
+For the unmerged stabilization work, follow [the controlled release and rollback checklist](release-readiness.md). Review the combined backend/gateway branch before deployment; the audit does not deploy or change this existing service automatically.
+
 ## Existing Render service
 
 1. In the dormenergy service choose Manual Deploy → Deploy latest commit. Keep the linked PostgreSQL database and existing SECRET_KEY.

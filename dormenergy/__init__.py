@@ -5,6 +5,7 @@ from pathlib import Path
 from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 from flask_wtf.csrf import CSRFError
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError, DisconnectionError
 from dotenv import load_dotenv
 from .extensions import csrf, db, login_manager, migrate
 from .models import User
@@ -53,6 +54,8 @@ def create_app(test_config=None):
         EMAIL_RESEND_COOLDOWN=int(os.getenv('EMAIL_RESEND_COOLDOWN', '60')),
         EMAIL_MAX_ATTEMPTS=int(os.getenv('EMAIL_MAX_ATTEMPTS', '6')),
         EMAIL_CREDIT_EXHAUSTION=os.getenv('EMAIL_CREDIT_EXHAUSTION', 'false').lower() == 'true',
+        FORECAST_RETRAIN_DAYS=int(os.getenv('FORECAST_RETRAIN_DAYS', '7')),
+        FORECAST_MAX_MODEL_DAYS=int(os.getenv('FORECAST_MAX_MODEL_DAYS', '30')),
     )
     if test_config:
         app.config.update(test_config)
@@ -67,6 +70,11 @@ def create_app(test_config=None):
         raise RuntimeError('Set a random SECRET_KEY in your environment or .env before starting.')
     if not app.config['SQLALCHEMY_DATABASE_URI']:
         raise RuntimeError('DATABASE_URL is required. See README for PostgreSQL setup.')
+    options = dict(app.config.get('SQLALCHEMY_ENGINE_OPTIONS', {}))
+    options.update(hide_parameters=True, pool_pre_ping=True, pool_recycle=300)
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = options
+    if not 1 <= app.config['FORECAST_RETRAIN_DAYS'] <= app.config['FORECAST_MAX_MODEL_DAYS'] <= 365:
+        raise RuntimeError('Forecast model age settings must satisfy 1 <= retrain <= maximum <= 365 days.')
     db.init_app(app)
     migrate.init_app(app, db, compare_type=True)
     csrf.init_app(app)
@@ -155,6 +163,13 @@ def create_app(test_config=None):
         if request.path.startswith('/api/'):
             return jsonify(error='The request could not be completed. Please try again.'), 500
         return render_template('error.html', code=500, message='We could not complete your request. Please try again.'), 500
+
+    @app.errorhandler(OperationalError)
+    @app.errorhandler(DisconnectionError)
+    def database_unavailable(error):
+        db.session.remove()
+        app.logger.warning('database_unavailable endpoint=%s', request.endpoint or 'unknown')
+        return jsonify(error='Database temporarily unavailable. Please retry.', error_code='database_unavailable'), 503
 
     @app.after_request
     def secure_headers(response):

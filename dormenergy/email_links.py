@@ -40,7 +40,10 @@ def check():
         db.session.commit()
         raise DomainError('Please wait before checking another link.',429)
     db.session.commit()
-    payload=request.get_json(silent=True)
+    try:
+        payload=request.get_json(silent=True)
+    except RecursionError:
+        raise DomainError('Invalid account link.',403) from None
     if not isinstance(payload,dict):
         raise DomainError('Invalid account link.',403)
     token,user=valid_link(payload.get('token'),payload.get('purpose'))
@@ -49,7 +52,10 @@ def check():
 
 
 def redeem(purpose):
-    payload=request.get_json(silent=True)
+    try:
+        payload=request.get_json(silent=True)
+    except RecursionError:
+        raise DomainError('A valid account link and password are required.') from None
     if not isinstance(payload,dict):
         raise DomainError('A valid account link and password are required.')
     token,user=valid_link(payload.get('token'),purpose,locked=True)

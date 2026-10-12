@@ -1,5 +1,7 @@
 # DormEnergy API contract
 
+Stabilization preserves endpoint/field names. Meter `unit_id` must be a JSON integer (booleans are rejected). Stored precision limits are energy 6, current 4, voltage/power 3 decimal places; excess precision is rejected atomically rather than rounded. Credential rotation is rechecked after acquiring billing locks. Temporary database failures return sanitized HTTP 503 with `error_code=database_unavailable`. Forecast metadata adds recursive backtest reports and model-age status; old model records remain readable.
+
 Browser APIs use the authenticated Flask session, server-side role checks, and `X-CSRFToken` for POSTs. Obtain the token from the dashboard's `csrf-token` meta element. Do not use browser session authentication for device traffic.
 
 Real mode excludes retired demonstration units and seeded tariffs from the workspace. Missing measurements are null, not invented zeroes. Sessions are invalidated when the account's session version changes. Temporary-password accounts must use `/account/password` before accessing other authenticated routes.

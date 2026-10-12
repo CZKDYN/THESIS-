@@ -57,9 +57,11 @@ def certificates(directory):
 
 class Faults:
     def __init__(self, application):
-        self.application = application; self.unavailable = True; self.lose_one_receipt = False; self.lost = 0
+        self.application = application; self.unavailable = True; self.lose_one_receipt = False; self.lost = 0; self.malformed = False
     def __call__(self, environ, start_response):
         if environ['PATH_INFO'] == '/api/iot/readings' and environ['REQUEST_METHOD'] == 'POST':
+            if self.malformed:
+                start_response('201 Created', [('Content-Type', 'application/json')]); return [b'{"accepted":true,"id":true}']
             if self.unavailable:
                 start_response('503 Service Unavailable', [('Content-Type', 'application/json')]); return [b'{}']
             if self.lose_one_receipt:
@@ -120,7 +122,8 @@ def test_three_rooms_network_restart_and_dashboard(tmp_path):
         settings.append('user root')  # Loopback temporary test broker only; production runs as mosquitto.
     broker_config.write_text('\n'.join(settings)+'\n')
     broker_log = open(tmp_path/'broker.log', 'wb')
-    broker = None; gateway = None; worker = None; server = None; server_thread = None
+    broker = None; gateway = None; worker = None; server = None; server_thread = None; killed_process = None
+    started = time.monotonic(); cpu_started = time.process_time(); recoveries = {}; upload_latency = []
     def start_broker():
         process = subprocess.Popen([broker_binary, '-c', str(broker_config)], stdout=broker_log, stderr=subprocess.STDOUT)
         def listening():
@@ -137,10 +140,6 @@ def test_three_rooms_network_restart_and_dashboard(tmp_path):
         db.drop_all(); db.session.execute(text('DROP TABLE IF EXISTS alembic_version')); db.session.commit()
         from flask_migrate import upgrade
         upgrade(directory='migrations')
-        # Alembic's fileConfig disables pre-existing loggers in this shared test process.
-        # The deployed gateway is a separate process; keep its test diagnostics active.
-        import logging
-        logging.getLogger('dormenergy.gateway').disabled = False
         for index in range(1, 4):
             unit = Unit(id=index, name=f'Isolated room {index}', room=f'Floor {index}', is_demo=False)
             db.session.add(unit); db.session.flush()
@@ -166,6 +165,13 @@ def test_three_rooms_network_restart_and_dashboard(tmp_path):
     config = load(config_path)
     def launch():
         instance = Gateway(config)
+        original_request = instance.sync.cloud.request
+        def measured_request(*args, **kwargs):
+            beginning = time.perf_counter()
+            try: return original_request(*args, **kwargs)
+            finally:
+                if args[0] == 'POST': upload_latency.append(time.perf_counter()-beginning)
+        instance.sync.cloud.request = measured_request
         thread = threading.Thread(target=instance.run); thread.start()
         eventually(lambda: instance.client.is_connected(), 10)
         return instance, thread
@@ -173,19 +179,19 @@ def test_three_rooms_network_restart_and_dashboard(tmp_path):
         gateway.stop.set(); worker.join(15); assert not worker.is_alive()
     def count():
         with app.app_context(): return db.session.scalar(select(func.count(Reading.id)))
-    def publish_wave(scenario):
+    def publish_wave(scenario, indexes=(1, 2, 3)):
         errors = []
         def send(index):
             try:
                 publish(config, SimpleNamespace(device=f'room{index}', username=f'room{index}', password_file=str(tmp_path/f'room{index}.secret'),
                                                journal=str(tmp_path/f'publisher-{index}.sqlite3'), scenario=scenario))
             except Exception as error: errors.append(type(error).__name__)
-        threads = [threading.Thread(target=send, args=(i,)) for i in range(1, 4)]
+        threads = [threading.Thread(target=send, args=(i,)) for i in indexes]
         for thread in threads: thread.start()
         for thread in threads: thread.join(20); assert not thread.is_alive()
         assert not errors
         import sqlite3
-        for index in range(1, 4):
+        for index in indexes:
             with sqlite3.connect(tmp_path/f'publisher-{index}.sqlite3') as fixtures:
                 assert fixtures.execute('SELECT count(*) FROM fixtures WHERE acked=0').fetchone()[0] == 0
     try:
@@ -201,6 +207,11 @@ def test_three_rooms_network_restart_and_dashboard(tmp_path):
         unauthorized.disconnect(); unauthorized.loop_stop()
         publish_wave('duplicate')
         assert gateway.journal.health()['unsent'] == 9 and count() == 0
+        outage_started = time.monotonic()
+        while time.monotonic()-outage_started < 60:
+            assert gateway.journal.health()['unsent'] == 9 and not gateway.failed and worker.is_alive()
+            time.sleep(.2)
+        outage_seconds = round(time.monotonic()-outage_started, 3)
         faults.unavailable = False
         eventually(lambda: gateway.journal.health()['unsent'] == 0)
         assert count() == 9
@@ -263,8 +274,120 @@ def test_three_rooms_network_restart_and_dashboard(tmp_path):
                 print(result.stdout.strip())
             finally:
                 browser_server.shutdown(); browser_server.server_close(); browser_thread.join(5)
-        print('ISOLATED E2E: 3 rooms, 27 readings, 24 independent charges, TLS MQTT ACL, verified HTTPS, outage buffering, gateway/broker restarts, exact duplicate receipt, admin/3 tenant dashboard scopes passed.')
+        # Only one room reports an online status; its readings cannot appear under another room.
+        publish_wave('normal', indexes=(1,))
+        eventually(lambda: gateway.journal.health()['unsent'] == 0)
+        assert count() == 30
+        status_client = mqtt_client(config, 'isolated-status', 'room1', credentials['room1'])
+        status_client.connect(config.mqtt_host, mqtt_port); status_client.loop_start()
+        eventually(status_client.is_connected, 5)
+        status_client.publish(config.devices[0].status_topic, json.dumps(dict(device_id='DEV-001',unit_id=1,online=True)),qos=1,retain=True).wait_for_publish(5)
+        eventually(lambda: sum(d['online'] for d in gateway.journal.health()['devices']) == 1)
+        status_client.disconnect(); status_client.loop_stop()
+
+        def drain(label):
+            beginning = time.monotonic()
+            eventually(lambda: gateway.journal.health()['unsent'] == 0)
+            recoveries[label] = round(time.monotonic()-beginning, 3)
+            assert not gateway.failed and worker.is_alive()
+
+        # Rotated credentials block only room 1; the original valid credential cannot be reused.
+        rotated = secrets.token_urlsafe(32)
+        with app.app_context():
+            db.session.get(Device,1).token_hash = generate_password_hash(rotated); db.session.commit()
+        publish_wave('normal')
+        eventually(lambda: gateway.journal.health()['queue_states'].get('blocked_auth') == 1 and count() == 36)
+        assert gateway.journal.health()['unsent'] == 3
+        assert Cloud(config).request('GET','/api/iot/readings/receipt?event_id=unknown',config.devices[0]).status == 401
+        config.devices[0].token_file.write_text(rotated)
+        gateway.journal.resume('room1'); drain('credential_rotation'); assert count() == 39
+
+        # Unavailable coverage must not commit a partial reading or charge.
+        with app.app_context():
+            db.session.get(Rate,1).valid_until = utcnow()-timedelta(hours=1); db.session.commit()
+        publish_wave('normal')
+        eventually(lambda: gateway.journal.health()['queue_states'].get('blocked_tariff') == 3)
+        assert count() == 39 and gateway.journal.health()['unsent'] == 9
+        with app.app_context():
+            db.session.get(Rate,1).valid_until = None; db.session.commit()
+        for device in config.devices: gateway.journal.resume(device.alias)
+        drain('tariff_restored'); assert count() == 48
+
+        # Database-driver failure is injected only on this disposable app's engine.
+        # The shared native PostgreSQL daemon and other databases stay available.
+        from sqlalchemy import event
+        from sqlalchemy.exc import OperationalError
+        with app.app_context(): engine = db.engine
+        def unavailable_database(*args):
+            raise OperationalError('test database unavailable',{},OSError('isolated fault'))
+        event.listen(engine,'before_cursor_execute',unavailable_database)
+        try:
+            assert Cloud(config).request('GET','/health').status == 503
+            publish_wave('normal')
+            assert gateway.journal.health()['unsent'] == 9
+        finally: event.remove(engine,'before_cursor_execute',unavailable_database)
+        assert count() == 48
+        drain('database_restored'); assert count() == 57
+
+        # A severed loopback HTTPS path models an unavailable internet uplink.
+        # This is transport loss, not a physical Wi-Fi or ISP field test.
+        server_port = server.server_port
+        server.shutdown(); server.server_close(); server_thread.join(5)
+        assert Cloud(config).request('GET','/health').status == 0
+        publish_wave('normal'); assert gateway.journal.health()['unsent'] == 9 and count() == 57
+        server = make_server('127.0.0.1',server_port,faults,threaded=True,ssl_context=(str(ca),str(key)),request_handler=QuietRequestHandler)
+        server_thread = threading.Thread(target=server.serve_forever,daemon=True); server_thread.start()
+        drain('https_path_restored'); assert count() == 66
+
+        faults.malformed = True; publish_wave('normal')
+        assert gateway.journal.health()['unsent'] == 9 and count() == 66
+        faults.malformed = False; drain('malformed_response_repaired'); assert count() == 75
+
+        # Kill a real gateway child process without cleanup, after its SQLite commits.
+        import sqlite3, sys
+        stop_gateway(); faults.unavailable = True
+        with open(tmp_path/'killed-gateway.log','wb') as child_log:
+            killed_process = subprocess.Popen([sys.executable,'-m','dormenergy_gateway','run','--config',str(config_path)],stdout=child_log,stderr=child_log)
+            def child_connected():
+                with sqlite3.connect(config.database) as queue:
+                    row = queue.execute("SELECT value FROM metadata WHERE key='broker'").fetchone()
+                    return killed_process.poll() is None and row and json.loads(row[0]).get('connected') is True
+            eventually(child_connected,10)
+            publish_wave('normal')
+            with sqlite3.connect(config.database) as queue:
+                assert queue.execute("SELECT count(*) FROM measurements WHERE status!='sent'").fetchone()[0] == 9
+            killed_process.kill(); killed_process.wait(10)
+            assert killed_process.returncode != 0
+        assert count() == 75
+        faults.unavailable = False; gateway, worker = launch(); drain('sigkill_restart'); assert count() == 84
+        # Sustained repeated three-room communication, with exact reconciliation after every wave.
+        for wave in range(10):
+            publish_wave('normal'); drain(f'stress_wave_{wave+1}')
+            assert count() == 84+9*(wave+1)
+        with app.app_context():
+            readings = db.session.scalar(select(func.count(Reading.id)))
+            transactions = db.session.scalars(select(Transaction)).all()
+            assert readings == 174 and len(transactions) == 171
+            assert len({t.reading_id for t in transactions}) == 171
+            for account in db.session.scalars(select(Account)):
+                charged = sum(-t.amount for t in transactions if t.unit_id == account.unit_id)
+                assert account.balance == Decimal('1000')-charged
+        from statistics import median
+        import math, resource
+        ordered = sorted(upload_latency)
+        report = dict(software_fixtures_only=True,rooms=3,accepted_readings=174,consumption_transactions=171,
+            duplicate_billing_incidents=0,final_unreconciled_readings=0,delivery_percent=100,
+            elapsed_seconds=round(time.monotonic()-started,3),cloud_outage_seconds=outage_seconds,process_cpu_seconds=round(time.process_time()-cpu_started,3),
+            peak_process_rss_mib=round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,3),
+            unexpected_worker_failures=0,intentional_process_kills=1,recovery_seconds=recoveries,
+            https_post=dict(samples=len(ordered),median_ms=round(median(ordered)*1000,3),p95_ms=round(ordered[math.ceil(len(ordered)*.95)-1]*1000,3)),
+            database_failure='Scoped SQLAlchemy OperationalError injection; native shared database daemon was not stopped.',
+            internet_failure='Loopback HTTPS listener removed and restored; no physical WAN outage claimed.')
+        artifacts = Path('artifacts/audit'); artifacts.mkdir(parents=True,exist_ok=True)
+        (artifacts/'network-reliability.json').write_text(json.dumps(report,indent=2))
+        print('ISOLATED E2E: 3 rooms, 174 readings, 171 unique charges; verified TLS/ACL, lost receipts, transport/SQL failures, credential/tariff recovery, actual process kill, stress and admin/tenant scopes passed.')
     finally:
+        if killed_process and killed_process.poll() is None: killed_process.kill(); killed_process.wait(10)
         if gateway and worker and worker.is_alive(): stop_gateway()
         if broker and broker.poll() is None: broker.terminate(); broker.wait(10)
         if server: server.shutdown(); server.server_close()

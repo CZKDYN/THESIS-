@@ -4,7 +4,7 @@ The application trains a separate CPU XGBoost model for each unit using its stor
 
 ## Train from actual readings
 
-1. Deploy the latest commit. The entrypoint applies migrations and starts one forecasting worker alongside Gunicorn; no simulator or demo training starts.
+1. Review and deploy an approved release using the [release checklist](release-readiness.md). The entrypoint applies migrations and starts one forecasting worker alongside Gunicorn; no simulator or demo training starts.
 2. Register a physical unit, configure its actual electricity rate, provision the meter token, and collect at least 720 covered hourly observations for that meter.
 3. Sign in as an administrator, select the unit, open **Forecasting**, and click **Train XGBoost**. The button queues a background job; ten-second dashboard polling reports progress. Existing models stay available while retraining runs.
 4. Inspect hourly predictions, held-out metrics, persistence/seasonal baselines, and observed-versus-predicted charts. Tenants can view only their assigned unit's results and cannot request training.
@@ -27,7 +27,11 @@ Eligible samples are split chronologically: 60% training, 20% validation, and 20
 
 The dashboard reports measured test MAE and RMSE in kWh and MAPE for nonzero actuals. It reports excluded zero targets; MAPE is unavailable if all actual targets are zero. Very small nonzero targets can make MAPE unstable. Persistence predicts the previous hour; the seasonal baseline predicts the same hour one day earlier. Seasonal metrics use only targets with that observation available and display their sample count. Charts retain the last 72 held-out points, while metrics cover the entire test segment.
 
-This is **next-hour chronological evaluation**. Actual observations from earlier test hours can become inputs for subsequent hours. It does not measure a 24-hour recursive forecast issued once at the start of the test window. Multi-hour backtests, uncertainty, duration-estimate error, representative real-data collection, and adviser-approved acceptance criteria remain necessary for research validation.
+The first report is **next-hour chronological evaluation**: earlier test observations can become later inputs. A separate fixed-model rolling-origin backtest evaluates **1/6/12/24-hour** endpoint and cumulative kWh errors using the same recursive inference as issuance. Each origin uses only preceding observations; subsequent lags use predictions. Future actuals are read only for scoring. The selected model is not refit or selected on those scores. Up to eight held-out origins, at least 24 hours apart, are evaluated. Origins without 24 consecutive targets or the preceding observation are excluded, with explicit counts/status. This finite coverage is not a calibrated uncertainty model.
+
+Every horizon retains MAE/RMSE/MAPE and sample/zero-exclusion counts for endpoints and cumulative consumption. Persistence uses the last observed hour; seasonal uses the corresponding previous-day observations and reports its own matched sample count. The dashboard summarizes cumulative baseline MAE alongside model endpoint/cumulative MAE; the API retains the full metrics. Older model JSON without this additive report remains readable and requests retraining for multi-hour evaluation. No confidence intervals or predictive accuracy claim is added. An isolated occupancy-change fixture actually performs worse than the simple baselines; its evidence is retained in [the validation report](software-validation.md).
+
+Retraining is due after `FORECAST_RETRAIN_DAYS` (default 7). At `FORECAST_MAX_MODEL_DAYS` (default 30), new issuance stops and the API returns `stale_model` with historical evaluation but no projections/credit duration. Settings must satisfy `1 <= retrain <= maximum <= 365`. These are operational policy limits, not empirical drift detection. An administrator requests retraining after checking covered fresh data and changes in occupancy; the software does not silently auto-retrain or claim the model remains accurate until the maximum age.
 
 ## Predictions and estimated credit duration
 

@@ -21,7 +21,7 @@ def utc(value: str) -> datetime:
         if stamp.tzinfo is None:
             raise ValueError()
         return stamp.astimezone(timezone.utc)
-    except (ValueError, TypeError, AttributeError):
+    except (ValueError, TypeError, AttributeError, OverflowError):
         raise InvalidMeasurement('timestamp_invalid') from None
 
 
