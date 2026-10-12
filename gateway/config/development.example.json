@@ -1,0 +1,51 @@
+{
+  "mode": "development",
+  "database": "development.sqlite3",
+  "mqtt": {
+    "host": "127.0.0.1",
+    "port": 18883,
+    "client_id": "dormenergy-gateway-dev",
+    "username": "gateway",
+    "password_file": "secrets/gateway-mqtt"
+  },
+  "cloud": {
+    "enabled": false
+  },
+  "storage": {
+    "max_pending": 100000,
+    "max_bytes": 536870912,
+    "min_free_bytes": 134217728,
+    "retention_days": 7
+  },
+  "stale_seconds": 90,
+  "ntp_grace_seconds": 86400,
+  "devices": [
+    {
+      "alias": "room1",
+      "device_id": "DEV-001",
+      "unit_id": 1,
+      "topic": "dormenergy/floor1/room1/telemetry",
+      "ack_topic": "dormenergy/floor1/room1/ack",
+      "status_topic": "dormenergy/floor1/room1/status",
+      "meter_epoch": "installation-1"
+    },
+    {
+      "alias": "room2",
+      "device_id": "DEV-002",
+      "unit_id": 2,
+      "topic": "dormenergy/floor2/room2/telemetry",
+      "ack_topic": "dormenergy/floor2/room2/ack",
+      "status_topic": "dormenergy/floor2/room2/status",
+      "meter_epoch": "installation-1"
+    },
+    {
+      "alias": "room3",
+      "device_id": "DEV-003",
+      "unit_id": 3,
+      "topic": "dormenergy/floor3/room3/telemetry",
+      "ack_topic": "dormenergy/floor3/room3/ack",
+      "status_topic": "dormenergy/floor3/room3/status",
+      "meter_epoch": "installation-1"
+    }
+  ]
+}

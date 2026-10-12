@@ -1,0 +1,23 @@
+# Expendable isolated tests only: no host ports, .env mounting, real tokens or retained volume.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: gateway_test
+      POSTGRES_PASSWORD: isolated-test-only
+      POSTGRES_DB: dormenergy_gateway_test
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U gateway_test -d dormenergy_gateway_test']
+      interval: 2s
+      timeout: 5s
+      retries: 30
+  tests:
+    build:
+      context: ..
+      dockerfile: gateway/scripts/Dockerfile.test
+    environment:
+      RUN_GATEWAY_E2E: '1'
+      GATEWAY_TEST_DATABASE_URL: postgresql+psycopg://gateway_test:isolated-test-only@postgres:5432/dormenergy_gateway_test
+    depends_on:
+      postgres:
+        condition: service_healthy

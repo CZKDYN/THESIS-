@@ -1,0 +1,17 @@
+.git
+.venv
+.env*
+__pycache__
+**/__pycache__
+**/*.egg-info
+artifacts
+instance
+gateway-local
+gateway/.venv
+gateway/secrets
+gateway/data
+gateway/build
+gateway/config.local.json
+*.sqlite*
+**/*.sqlite*
+*.log

@@ -1,0 +1,26 @@
+# MQTT authentication + TLS enforce these identities. No anonymous/wildcard grants.
+user gateway
+topic read dormenergy/floor1/room1/telemetry
+topic read dormenergy/floor1/room1/status
+topic write dormenergy/floor1/room1/ack
+topic read dormenergy/floor2/room2/telemetry
+topic read dormenergy/floor2/room2/status
+topic write dormenergy/floor2/room2/ack
+topic read dormenergy/floor3/room3/telemetry
+topic read dormenergy/floor3/room3/status
+topic write dormenergy/floor3/room3/ack
+
+user room1
+topic write dormenergy/floor1/room1/telemetry
+topic write dormenergy/floor1/room1/status
+topic read dormenergy/floor1/room1/ack
+
+user room2
+topic write dormenergy/floor2/room2/telemetry
+topic write dormenergy/floor2/room2/status
+topic read dormenergy/floor2/room2/ack
+
+user room3
+topic write dormenergy/floor3/room3/telemetry
+topic write dormenergy/floor3/room3/status
+topic read dormenergy/floor3/room3/ack

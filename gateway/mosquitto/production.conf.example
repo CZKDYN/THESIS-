@@ -1,0 +1,15 @@
+# Place in /etc/mosquitto/conf.d/dormenergy.conf after editing the Pi LAN address.
+# Remove any other listener granting anonymous/plaintext LAN access.
+listener 8883 192.168.1.20
+allow_anonymous false
+use_username_as_clientid true
+password_file /etc/mosquitto/dormenergy.passwd
+acl_file /etc/mosquitto/dormenergy.acl
+certfile /etc/mosquitto/certs/pi.crt
+keyfile /etc/mosquitto/certs/pi.key
+tls_version tlsv1.2
+max_packet_size 16384
+max_queued_messages 10000
+persistent_client_expiration 14d
+# Raspberry Pi OS's main mosquitto.conf already enables persistence and log files.
+# Merge into that file if your distribution does not include conf.d/*.conf.

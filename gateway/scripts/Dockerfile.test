@@ -1,0 +1,14 @@
+FROM python:3.12-slim
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update -o APT::Update::Error-Mode=any && apt-get install -y --no-install-recommends mosquitto mosquitto-clients \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /project
+COPY requirements.lock.txt pyproject.toml ./
+COPY dormenergy ./dormenergy
+COPY migrations ./migrations
+COPY gateway/pyproject.toml gateway/requirements.txt gateway/requirements-dev.txt ./gateway/
+COPY gateway/src ./gateway/src
+COPY gateway/tests ./gateway/tests
+RUN python -m pip install --no-cache-dir -r requirements.lock.txt -r gateway/requirements-dev.txt \
+    && python -m pip install --no-build-isolation --no-deps -e gateway
+CMD ["python", "-m", "pytest", "-q", "-s", "gateway/tests"]

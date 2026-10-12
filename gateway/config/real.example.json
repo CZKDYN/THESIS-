@@ -1,0 +1,58 @@
+{
+  "mode": "real",
+  "database": "/var/lib/dormenergy-gateway/measurements.sqlite3",
+  "mqtt": {
+    "host": "192.168.1.20",
+    "port": 8883,
+    "client_id": "dormenergy-gateway-pi4",
+    "username": "gateway",
+    "password_file": "/etc/dormenergy-gateway/secrets/gateway-mqtt",
+    "ca_file": "/etc/dormenergy-gateway/ca.crt"
+  },
+  "cloud": {
+    "enabled": true,
+    "base_url": "https://dormenergy.onrender.com",
+    "timeout_seconds": 10,
+    "max_attempts": 8
+  },
+  "storage": {
+    "max_pending": 100000,
+    "max_bytes": 536870912,
+    "min_free_bytes": 134217728,
+    "retention_days": 7
+  },
+  "stale_seconds": 90,
+  "ntp_grace_seconds": 86400,
+  "devices": [
+    {
+      "alias": "room1",
+      "device_id": "REPLACE-WITH-REGISTERED-ROOM-1",
+      "unit_id": 1,
+      "topic": "dormenergy/floor1/room1/telemetry",
+      "ack_topic": "dormenergy/floor1/room1/ack",
+      "status_topic": "dormenergy/floor1/room1/status",
+      "meter_epoch": "installation-1",
+      "token_file": "/etc/dormenergy-gateway/secrets/room1-api"
+    },
+    {
+      "alias": "room2",
+      "device_id": "REPLACE-WITH-REGISTERED-ROOM-2",
+      "unit_id": 2,
+      "topic": "dormenergy/floor2/room2/telemetry",
+      "ack_topic": "dormenergy/floor2/room2/ack",
+      "status_topic": "dormenergy/floor2/room2/status",
+      "meter_epoch": "installation-1",
+      "token_file": "/etc/dormenergy-gateway/secrets/room2-api"
+    },
+    {
+      "alias": "room3",
+      "device_id": "REPLACE-WITH-REGISTERED-ROOM-3",
+      "unit_id": 3,
+      "topic": "dormenergy/floor3/room3/telemetry",
+      "ack_topic": "dormenergy/floor3/room3/ack",
+      "status_topic": "dormenergy/floor3/room3/status",
+      "meter_epoch": "installation-1",
+      "token_file": "/etc/dormenergy-gateway/secrets/room3-api"
+    }
+  ]
+}

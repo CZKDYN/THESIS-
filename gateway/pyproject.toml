@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools==80.9.0", "wheel==0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dormenergy-gateway"
+version = "0.1.0"
+description = "Durable MQTT-to-HTTPS monitoring gateway for DormEnergy"
+requires-python = ">=3.11"
+dependencies = ["paho-mqtt==2.1.0", "tzdata==2025.2"]
+
+[project.scripts]
+dormenergy-gateway = "dormenergy_gateway.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

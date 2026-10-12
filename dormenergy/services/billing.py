@@ -10,8 +10,8 @@ MONEY_PRECISION = Decimal('0.000001')
 
 
 class DomainError(Exception):
-    def __init__(self, message, status=422):
-        self.message, self.status = message, status
+    def __init__(self, message, status=422, code='validation_failed'):
+        self.message, self.status, self.code = message, status, code
 
 
 def lock_unit(unit_id, allow_archived=False):
@@ -64,7 +64,7 @@ def charge_for_interval(delta, start, end):
     message = ('No owner-confirmed utility rate covers this reading interval. Confirm the applicable utility bill and validity period.'
                if current_app.config['UTILITY_RATE_LOCKED'] else 'No electricity rate covers this reading interval.')
     if not rate_covers(first, start):
-        raise DomainError(message)
+        raise DomainError(message, code='tariff_unavailable')
     changes = db.session.scalars(rates.where(Rate.effective_at > start, Rate.effective_at <= end).order_by(Rate.effective_at)).all()
     if end == start:
         return Decimal('0'), first
@@ -72,12 +72,12 @@ def charge_for_interval(delta, start, end):
     cost, cursor, rate = Decimal('0'), start, first
     for change in changes:
         if not rate_covers(rate, cursor, aware(change.effective_at)):
-            raise DomainError(message)
+            raise DomainError(message, code='tariff_unavailable')
         seconds = Decimal(str((aware(change.effective_at) - cursor).total_seconds()))
         cost += delta * (seconds / duration) * rate.php_per_kwh
         cursor, rate = aware(change.effective_at), change
     if not rate_covers(rate, cursor, end):
-        raise DomainError(message)
+        raise DomainError(message, code='tariff_unavailable')
     cost += delta * Decimal(str((end - cursor).total_seconds())) / duration * rate.php_per_kwh
     return cost.quantize(MONEY_PRECISION, rounding=ROUND_HALF_UP), rate
 
@@ -92,15 +92,15 @@ def ingest_reading(device_id, payload, source):
     device = db.session.scalar(select(Device).where(Device.id == device_id).with_for_update()
                                .execution_options(populate_existing=True))
     if payload.get('device_id') != device.identifier or payload.get('unit_id') != device.unit_id:
-        raise DomainError('Device and unit must match the registered device.', 403)
+        raise DomainError('Device and unit must match the registered device.', 403, 'device_mapping_invalid')
     event_id, epoch = payload.get('event_id'), payload.get('meter_epoch')
     if not isinstance(event_id, str) or not 1 <= len(event_id) <= 64 or not isinstance(epoch, str) or not 1 <= len(epoch) <= 64:
         raise DomainError('event_id and meter_epoch must be strings of 1–64 characters.')
     if db.session.scalar(select(Reading.id).where(Reading.device_id == device.id, Reading.event_id == event_id)):
-        raise DomainError('This reading was already accepted; no additional charge was made.', 409)
+        raise DomainError('This reading was already accepted; no additional charge was made.', 409, 'duplicate_event')
     timestamp = parse_timestamp(payload.get('timestamp'))
     if device.last_timestamp and timestamp <= aware(device.last_timestamp):
-        raise DomainError('Readings must be synchronized in timestamp order.', 409)
+        raise DomainError('Readings must be synchronized in timestamp order.', 409, 'timestamp_order_conflict')
     energy = decimal_value(payload.get('energy_kwh'), 'energy_kwh').quantize(MONEY_PRECISION)
     voltage = decimal_value(payload.get('voltage'), 'voltage', Decimal('300'))
     current = decimal_value(payload.get('current'), 'current', Decimal('100'))
@@ -110,9 +110,9 @@ def ingest_reading(device_id, payload, source):
         raise DomainError('Invalid connection_status.')
     reset = device.meter_epoch is not None and device.meter_epoch != epoch
     if reset and not payload.get('reset_confirmed') is True:
-        raise DomainError('A changed meter epoch requires reset_confirmed=true; consumption is re-baselined.')
+        raise DomainError('A changed meter epoch requires reset_confirmed=true; consumption is re-baselined.', code='reset_confirmation_required')
     if not reset and device.last_energy is not None and energy < device.last_energy:
-        raise DomainError('Cumulative energy decreased. Send an explicitly confirmed new meter epoch.')
+        raise DomainError('Cumulative energy decreased. Send an explicitly confirmed new meter epoch.', code='counter_decreased')
     delta = Decimal('0') if reset or device.last_energy is None else energy - device.last_energy
     start = timestamp if reset or device.last_timestamp is None else aware(device.last_timestamp)
     cost, rate = charge_for_interval(delta, start, timestamp)

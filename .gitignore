@@ -10,3 +10,17 @@ htmlcov/
 instance/
 *.log
 artifacts/
+*.egg-info/
+gateway-local/
+gateway/.venv/
+gateway/config.local.json
+gateway/data/
+gateway/secrets/
+gateway/build/
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+*.service-lock

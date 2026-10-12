@@ -26,6 +26,7 @@ Real mode excludes retired demonstration units and seeded tariffs from the works
 | POST | `/api/units/<id>/tenant/end` | Admin; revokes access, rejects pending requests, retains the former account/history and unit balance, and permits a replacement tenant. |
 | POST | `/api/units/<id>/device-token` | Admin + current password; `current_password`, `action=generate` (default) or `revoke`. Returns a one-time token only for generate; previous tokens are invalidated. Response is not cached. |
 | POST | `/api/iot/readings` | Device bearer authentication, scoped to the registered device and unit. |
+| GET | `/api/iot/readings/receipt?event_id=<id>` | Device bearer authentication; returns only that device's accepted measurement for exact retry reconciliation, or 404. No balance or another device's receipt is exposed. |
 | GET | `/api/iot/instructions` | Device bearer authentication; returns an empty command list and `control_enabled=false`. |
 
 ## Forecast responses
@@ -74,7 +75,11 @@ Replace the example timestamp with the actual measurement time. Valid supply sta
 
 Success is **201**, with `accepted`, reading `id`, and `delta_kwh`. The first reading is a zero-cost baseline. **401** means invalid authentication; **403** means wrong device/unit/source; **409** means duplicate or out-of-order reading; **422** means validation failure. A rejected reading changes neither balance nor transactions.
 
-For offline synchronization, retain unsent measurements on the Raspberry Pi with their original timestamps and event IDs. Replay oldest first. A retry of an accepted event returns 409 without charging again. The gateway must distinguish the duplicate message from an ordering conflict; reconcile its queue with acknowledged event IDs. Offline samples remain historical; recent receipt does not make an old measurement appear live. The prototype does not implement the physical gateway's queue or firmware.
+For offline synchronization, retain unsent measurements on the Raspberry Pi with their original timestamps and event IDs. Replay oldest first per device. A retry of an accepted event returns 409 without charging again. On **every 409**, fetch the scoped receipt and compare device/unit/event/epoch, original timestamp, all four measured values and connection status. Mark synchronized only on an exact match. A missing or different receipt leaves the original row held for operator investigation. Offline samples remain historical; recent receipt does not make an old measurement appear live. The [gateway package](../gateway/README.md) implements this durable queue; ESP32 firmware must implement the documented application ACK and durable upstream journal.
+
+Device errors also expose stable `error_code` values: `device_authentication_failed` (401), `device_mapping_invalid` (403), `duplicate_event` or `timestamp_order_conflict` (409), `tariff_unavailable`, `counter_decreased`, `reset_confirmation_required`, or `validation_failed` (422). Messages remain compatible with existing clients. No database migration is needed for this API addition. The receipt route is read-only; failed/duplicate submissions retain the existing atomic billing behavior.
+
+The isolated gateway test client adds `gateway_fixture=true`; normal deployments reject that flag with 403 `development_fixture_forbidden`. Only an explicitly `TESTING=True` local Flask instance accepts these fixtures. The gateway's default development mode performs no HTTP uploads; isolated tests restrict the backend to loopback. Production deployment must keep `SIMULATION_MODE=false` and use genuine hardware payloads.
 
 For a confirmed physical meter reset, use a **new** stable `meter_epoch` and `reset_confirmed=true`. The backend logs a meter-reset event and establishes a zero-cost baseline. It does not guess consumption during the reset gap. Do not change the epoch on an ESP32 restart if the meter's cumulative counter has not actually reset. A counter decrease without confirmation is rejected.
 
