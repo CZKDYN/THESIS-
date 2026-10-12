@@ -295,7 +295,7 @@ def test_https_origin_and_email_api_never_expose_private_links(app,client):
     unit,user_id,row_id,raw=invite(app,client)
     data=client.get('/api/email-status').json
     assert raw not in json.dumps(data) and 'payload_encrypted' not in json.dumps(data)
-    assert client.get('/activate').headers['Referrer-Policy']=='no-referrer'
+    assert client.get('/activate').headers['Referrer-Policy']=='same-origin'
     assert raw not in client.get('/activate').get_data(as_text=True)
     app.config['PUBLIC_BASE_URL']='http://untrusted.example'
     with app.app_context():assert configuration_error()=='configuration'

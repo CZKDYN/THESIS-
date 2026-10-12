@@ -109,12 +109,26 @@ def create_app(test_config=None):
 
     @app.errorhandler(CSRFError)
     def csrf_error(error):
+        reasons = {
+            'The CSRF token is missing.': 'token_missing',
+            'The CSRF session token is missing.': 'session_missing',
+            'The CSRF token has expired.': 'token_expired',
+            'The CSRF token is invalid.': 'token_invalid',
+            'The CSRF tokens do not match.': 'token_mismatch',
+            'The referrer header is missing.': 'referrer_missing',
+            'The referrer does not match the host.': 'referrer_mismatch',
+        }
+        app.logger.warning('form_rejected endpoint=%s reason=%s', request.endpoint or 'unknown',
+                           reasons.get(error.description, 'validation_failed'))
         if request.path.startswith('/api/'):
             return jsonify(error='Session expired. Reload the page and try again.'), 400
         if request.endpoint == 'web.login' and request.method == 'POST':
             # Reject the old submission and request a fresh GET; never replay credentials.
             session.pop('csrf_token', None)
-            flash('Your sign-in page expired. Please sign in again.', 'error')
+            message = ('Your sign-in form could not be verified. Reload the page and try again.'
+                       if reasons.get(error.description, '').startswith('referrer_')
+                       else 'Your sign-in page expired. Please sign in again.')
+            flash(message, 'error')
             return redirect(url_for('web.login'), code=303)
         return render_template('error.html', code=400, message='Your form expired. Please reload and try again.'), 400
 
@@ -137,7 +151,9 @@ def create_app(test_config=None):
     def secure_headers(response):
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-Frame-Options'] = 'DENY'
-        response.headers['Referrer-Policy'] = 'no-referrer'
+        # HTTPS form protection needs same-origin referrers. External requests get none;
+        # URL fragments containing account-link secrets are never included by browsers.
+        response.headers['Referrer-Policy'] = 'same-origin'
         response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; form-action 'self'"
         if request.path.startswith('/api/') or request.path in ('/dashboard', '/login', '/setup', '/account', '/account/password', '/activate', '/reset-password', '/forgot-password'):
             response.headers['Cache-Control'] = 'no-store'

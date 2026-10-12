@@ -48,7 +48,7 @@ Existing accounts stay active/inactive as before. Existing administrator setup r
 
 Forgot Password? uses the same generic response for unknown, inactive, pending, former or eligible addresses. Eligible active accounts get a 30-minute single-use reset link. Password reset revokes sessions and other links and sends a confirmation when configured. It cannot create an administrator or choose a unit. Former tenants and archived/demo units cannot activate/recover access. Ending tenancy or archiving cancels outstanding links/messages; replacement tenants get their own records/recipients.
 
-Account links carry 256-bit random secrets in URL fragments. The browser strips the fragment from the address bar and posts it in the CSRF-protected body. GET requests do not consume links, so an ordinary email scanner cannot activate an account. Pages use no-referrer/no-store controls. JavaScript is required; copy the complete link including the fragment if the email button fails.
+Account links carry 256-bit random secrets in URL fragments. The browser strips the fragment from the address bar and posts it in the CSRF-protected body. GET requests do not consume links, so an ordinary email scanner cannot activate an account. Pages use no-store and a same-origin referrer policy: HTTPS form protection receives the same-site referrer, external sites receive none, and fragments never enter the referrer. JavaScript is required; copy the complete link including the fragment if the email button fails.
 
 ## Billing and preferences
 
@@ -80,7 +80,7 @@ The retained database upgrade was checked against fourteen existing tables. Reco
 
 ## Validation and limitations
 
-59 PostgreSQL tests pass, including the prior 38 regressions and 21 email cases. Portable SQLite passes 53 with six expected PostgreSQL-only concurrency skips. Seven new email browser checks cover invitation/expiry/resend, activation, privacy, recovery, status and phone layouts; ten existing real-mode browser workflows also pass. Evidence is in ignored artifacts/email-tests.xml, email-portable-tests.xml, browser-email-smoke.json, browser-real-smoke.json and email-migration-preservation.json.
+68 PostgreSQL tests pass, including the prior 38 regressions, 21 email cases and nine sign-in/HTTPS security cases. Portable SQLite passes 62 with six expected PostgreSQL-only concurrency skips. Seven email browser checks cover invitation/expiry/resend, activation, privacy, recovery, status and phone layouts; ten existing real-mode browser workflows also pass. Six additional browser checks exercise real local HTTPS with secure cookies and strict CSRF, including activation and recovery. Evidence is in ignored artifacts/https-full-tests.xml, https-portable-tests.xml, browser-https-smoke.json, browser-email-smoke.json, browser-real-smoke.json and email-migration-preservation.json.
 
 No actual Resend key/verified sender was available during implementation; real provider acceptance/inbox delivery and the latest Render deployment/hosted CI are not verified. Hosted throughput/memory, penetration testing, inbox/bounce processing and provider policy/limits need operational validation. Free hosting sleep pauses both background workers. Recovery limits use the server-observed source address; a shared reverse-proxy address can share its quota. Configure a trusted proxy strategy before widening limits or trusting forwarded headers.
 
@@ -96,6 +96,6 @@ No actual Resend key/verified sender was available during implementation; real p
 
 ## Changed file inventory
 
-New: dormenergy/services/emailing.py; dormenergy/email_links.py; dormenergy/templates/email_account.html; dormenergy/templates/emails/message.html and message.txt; dormenergy/static/js/account-links.js; migrations/versions/c9046fd275ad_email_onboarding_and_outbox.py; tests/test_email_onboarding.py; scripts/browser_email_smoke.py; docs/email-system.md.
+New: dormenergy/services/emailing.py; dormenergy/email_links.py; dormenergy/templates/email_account.html; dormenergy/templates/emails/message.html and message.txt; dormenergy/static/js/account-links.js; migrations/versions/c9046fd275ad_email_onboarding_and_outbox.py; tests/test_email_onboarding.py and test_login_recovery.py; scripts/browser_email_smoke.py and browser_https_smoke.py; docs/email-system.md.
 
-Modified: dormenergy/__init__.py, models.py, api.py, web.py, commands.py; services/accounts.py and billing.py; templates/account.html, dashboard.html and login.html; static/js/dashboard.js and static/css/app.css; requirements.txt and requirements.lock.txt; scripts/start-render.sh, start-cloud.sh, stop-cloud.sh and browser_real_smoke.py; .env.example; README.md; docs/api.md, deployment.md, real-mode.md and testing.md. Hardware.py and the XGBoost algorithm are unchanged.
+Modified: dormenergy/__init__.py, models.py, api.py, web.py, commands.py; services/accounts.py and billing.py; templates/account.html, dashboard.html and login.html; static/js/dashboard.js and static/css/app.css; requirements.txt and requirements.lock.txt; scripts/start-render.sh, start-cloud.sh, stop-cloud.sh and browser_real_smoke.py; tests/test_workflows.py; .env.example; README.md; docs/api.md, deployment.md, real-mode.md and testing.md. Hardware.py and the XGBoost algorithm are unchanged.

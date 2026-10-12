@@ -68,3 +68,46 @@ def test_other_requests_keep_csrf_rejection_without_mutation(app, client):
         assert db.session.scalar(select(func.count(Unit.id))) == 2
         user = db.session.scalar(select(User).where(User.email == 'admin@test.local'))
         assert user.email_balance_alerts and user.email_load_updates
+
+
+def test_https_login_and_account_forms_keep_same_origin_protection(app, client):
+    origin = 'https://localhost'
+    app.config['SESSION_COOKIE_SECURE'] = True
+    page = client.get('/login', base_url=origin)
+    assert page.headers['Referrer-Policy'] == 'same-origin'
+    assert 'Secure;' in page.headers['Set-Cookie']
+    response = client.post('/login', base_url=origin, headers={'Referer': origin+'/login'},
+                           data={'email': 'admin@test.local', 'password': PASSWORD, 'csrf_token': form_token(page)})
+    assert response.status_code == 302 and response.headers['Location'] == '/dashboard'
+    page = client.get('/account', base_url=origin)
+    assert page.headers['Referrer-Policy'] == 'same-origin'
+    token = form_token(page)
+    response = client.post('/account/preferences', base_url=origin, headers={'Referer': origin+'/account'},
+                           data={'csrf_token': token, 'email_balance_alerts': 'on'})
+    assert response.status_code == 302
+    rejected = client.post('/account/preferences', base_url=origin, headers={'Referer': 'https://attacker.example/form'},
+                           data={'csrf_token': token, 'email_load_updates': 'on'})
+    assert rejected.status_code == 400
+    with app.app_context():
+        user = db.session.scalar(select(User).where(User.email == 'admin@test.local'))
+        assert user.email_balance_alerts and not user.email_load_updates
+
+
+@pytest.mark.parametrize('referer', [None, 'https://attacker.example/login'])
+def test_https_missing_or_foreign_referrer_is_rejected_with_safe_reason(app, client, caplog, monkeypatch, referer):
+    origin = 'https://localhost'
+    app.config['SESSION_COOKIE_SECURE'] = True
+    # The migration fixture replaces logging handlers; capture the web logger directly.
+    monkeypatch.setattr(app.logger, 'disabled', False)
+    monkeypatch.setattr(app.logger, 'handlers', [caplog.handler])
+    page = client.get('/login', base_url=origin)
+    headers = {'Referer': referer} if referer else {}
+    response = client.post('/login', base_url=origin, headers=headers,
+                           data={'email': 'admin@test.local', 'password': PASSWORD, 'csrf_token': form_token(page)})
+    assert response.status_code == 303 and response.headers['Location'] == '/login'
+    assert client.get('/api/snapshot', base_url=origin).status_code == 401
+    fresh = client.get('/login', base_url=origin)
+    assert 'Your sign-in form could not be verified.' in fresh.get_data(as_text=True)
+    assert ('reason=referrer_missing' if referer is None else 'reason=referrer_mismatch') in caplog.text
+    assert PASSWORD not in caplog.text and 'admin@test.local' not in caplog.text
+    assert form_token(page) not in caplog.text

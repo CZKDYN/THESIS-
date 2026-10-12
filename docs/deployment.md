@@ -29,6 +29,7 @@ The free service may sleep, pausing forecast jobs and making physical gateway re
 ## Troubleshoot
 
 - Expired sign-in form after deployment or key rotation: open /login in a fresh tab and sign in again. Rejected login forms redirect to a fresh GET with a notice; credentials are never replayed. If it repeats on a freshly opened form, clear this site's cookies or try a private window and confirm cookies are permitted and SECRET_KEY is stable across all web workers. Keep SESSION_COOKIE_SECURE=true on hosted HTTPS. Do not disable CSRF protection.
+- Fresh HTTPS form repeatedly rejected: application responses must keep Referrer-Policy=same-origin. A blanket no-referrer policy prevents Flask-WTF's HTTPS same-origin check even with a valid token. Safe form_rejected log codes distinguish token/session failures from referrer_missing/referrer_mismatch without logging secrets. Keep the strict HTTPS check enabled; verify actual HTTPS browser flows rather than HTTP-only local forms.
 - Database/startup errors: inspect migrations and the linked DATABASE_URL. Standard postgres/postgresql prefixes are normalized to psycopg while preserving TLS options.
 - Empty dashboard: register actual units. The retained demonstration workspace is intentionally excluded.
 - Sign-in redirects to password change: replace the temporary tenant password before using other routes.
