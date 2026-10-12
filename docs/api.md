@@ -19,7 +19,9 @@ Real mode excludes retired demonstration units and seeded tariffs from the works
 | POST | `/api/units/<id>/edit` | Admin; `name`, `room`, `threshold`. Preserves device identity and balance/history. |
 | POST | `/api/units/<id>/archive` | Admin; removes the unit from the active workspace, disables tenant access and meter ingestion, rejects pending load requests, and retains balances and all records. |
 | POST | `/api/units/<id>/restore` | Admin; restores the same unit, existing tenant login, and meter ingestion. Rejected requests stay rejected. |
-| POST | `/api/units/<id>/tenant` | Admin; `name`, `email`, `password` (12–128 chars). Creates a current tenant in an unassigned unit and requires first-login password change. |
+| POST | `/api/units/<id>/tenant` | Admin; `name`, `email`, optional `registration_method=email` (default) or `temporary_password` with `password`. Email mode creates a pending account and queues activation. Legacy password-only clients keep their temporary-password workflow. |
+| POST | `/api/units/<id>/tenant/invitation` | Admin; safely replaces a pending tenant's invitation. Cooldown/quota violations return 429. Delivery status is separate from account activation. |
+| GET | `/api/email-status` | Admin; non-sensitive delivery states, attempts and safe error messages. Never returns bodies, tokens, ciphertext, recipients or API keys. |
 | POST | `/api/units/<id>/tenant/password` | Admin; `password`. Sets a temporary password, revokes existing sessions, and requires a private password at next sign-in. |
 | POST | `/api/units/<id>/tenant/end` | Admin; revokes access, rejects pending requests, retains the former account/history and unit balance, and permits a replacement tenant. |
 | POST | `/api/units/<id>/device-token` | Admin + current password; `current_password`, `action=generate` (default) or `revoke`. Returns a one-time token only for generate; previous tokens are invalidated. Response is not cached. |
@@ -36,7 +38,9 @@ Training is asynchronous: 202 means queued, not successfully trained. Poll the s
 
 `/setup` accepts a hosting-secret `setup_token`, name/email, new password and confirmation only while no active administrator exists. POSTs require CSRF. PostgreSQL serializes concurrent setup attempts. An absent setup secret disables owner creation rather than supplying a public password.
 
-Authenticated `/account` edits name/email after current-password verification. `/account/password` verifies the current password and confirmation, changes the password, revokes other sessions, and retains the requesting session. Administrator tenant resets require another first-login change. No email delivery or unauthenticated recovery route is provided.
+Authenticated `/account` edits name/email after current-password verification and queues security notices on email changes. `/account/password` verifies the current password/confirmation, changes the password, revokes other sessions/links, and retains the requesting session. Administrator tenant resets require another first-login change. `/account/preferences` changes only nonessential balance/load email preferences; security messages have no opt-out.
+
+Public `/forgot-password` accepts a CSRF-protected email form and always gives the same generic confirmation. Eligible accounts receive a queued expiring reset link. `/activate` and `/reset-password` render link pages; POST JSON needs token, new_password, confirm_password and CSRF. Successful redemption is single-use and redirects to login. `/api/account-links/check` validates a token/purpose with CSRF and quotas without consuming it. Production links use the configured HTTPS origin and a URL fragment; the browser removes the fragment and submits its secret in the body. Tokens never belong in query strings or path parameters. See [email configuration/security details](email-system.md).
 
 Tenant credit requests are scoped to the current user. Transaction lists/exports and notifications exclude records before that account's creation; consumption is unit-meter history. Administrator demo exports require explicit `include_demo=true` and normally `include_archived=true`. Retired sample names can be reused for newly registered physical units while the old label receives a demo suffix; records retain their original IDs and sources.
 

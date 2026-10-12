@@ -21,3 +21,6 @@ def change_password(user, value, temporary=False):
     user.set_password(password_value(value))
     user.must_change_password = temporary
     user.session_version += 1
+    from .emailing import revoke_links, security_email
+    revoke_links(user)
+    security_email(user,'temporary' if temporary else 'password')

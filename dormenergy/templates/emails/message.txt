@@ -1,0 +1,18 @@
+DormEnergy
+{{ heading }}
+
+Hello {{ name }},
+
+{{ message }}
+{% for label,value in details %}
+{{ label }}: {{ value }}
+{% endfor %}
+
+{{ action_label }}:
+{{ action_url }}
+{% if expiration %}
+This single-use link expires on {{ expiration }}. Do not share or forward it.
+{% endif %}
+
+Official website: {{ website }}
+No password or administrator setup token is included in this message.

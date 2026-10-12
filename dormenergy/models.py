@@ -35,11 +35,16 @@ class User(UserMixin, db.Model):
     tenancy_ended_at = db.Column(db.DateTime(timezone=True))
     must_change_password = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
     session_version = db.Column(db.Integer, nullable=False, default=1, server_default='1')
+    activation_status = db.Column(db.String(16), nullable=False, default='active', server_default='active')
+    email_verified_at = db.Column(db.DateTime(timezone=True))
+    email_balance_alerts = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
+    email_load_updates = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     unit = db.relationship("Unit")
     __table_args__ = (
         CheckConstraint("role IN ('admin', 'tenant')", name="valid_user_role"),
         CheckConstraint("role != 'tenant' OR unit_id IS NOT NULL", name="tenant_requires_unit"),
+        CheckConstraint("activation_status IN ('pending', 'active')", name='valid_activation_status'),
         db.Index('uq_current_tenant_unit', 'unit_id', unique=True,
                  postgresql_where=db.text("role = 'tenant' AND tenancy_ended_at IS NULL"),
                  sqlite_where=db.text("role = 'tenant' AND tenancy_ended_at IS NULL")),
@@ -212,3 +217,49 @@ class AuditLog(db.Model):
     action = db.Column(db.String(64), nullable=False, index=True)
     detail = db.Column(db.String(400), nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+
+
+class AccountToken(db.Model):
+    __tablename__ = 'account_tokens'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    unit_id = db.Column(db.Integer, db.ForeignKey('dormitory_units.id'))
+    purpose = db.Column(db.String(16), nullable=False)
+    token_hash = db.Column(db.String(64), nullable=False, unique=True)
+    email_snapshot = db.Column(db.String(254), nullable=False)
+    session_version = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    expires_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    consumed_at = db.Column(db.DateTime(timezone=True))
+    revoked_at = db.Column(db.DateTime(timezone=True))
+    __table_args__ = (CheckConstraint("purpose IN ('activation', 'reset')", name='valid_token_purpose'),)
+
+
+class EmailOutbox(db.Model):
+    __tablename__ = 'email_outbox'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    unit_id = db.Column(db.Integer, db.ForeignKey('dormitory_units.id'))
+    token_id = db.Column(db.Integer, db.ForeignKey('account_tokens.id'))
+    kind = db.Column(db.String(40), nullable=False)
+    dedupe_key = db.Column(db.String(200), nullable=False, unique=True)
+    payload_encrypted = db.Column(db.Text)
+    status = db.Column(db.String(16), nullable=False, default='pending')
+    attempts = db.Column(db.Integer, nullable=False, default=0)
+    error_code = db.Column(db.String(50))
+    next_attempt_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    lease_id = db.Column(db.String(36))
+    leased_until = db.Column(db.DateTime(timezone=True))
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    sent_at = db.Column(db.DateTime(timezone=True))
+    provider_message_id = db.Column(db.String(128))
+    __table_args__ = (CheckConstraint("status IN ('pending', 'sending', 'sent', 'failed', 'cancelled', 'test')", name='valid_email_status'),)
+
+
+class EmailRateLimit(db.Model):
+    __tablename__ = 'email_rate_limits'
+    id = db.Column(db.Integer, primary_key=True)
+    limit_key = db.Column(db.String(64), nullable=False)
+    window_start = db.Column(db.DateTime(timezone=True), nullable=False)
+    hits = db.Column(db.Integer, nullable=False, default=1)
+    __table_args__ = (UniqueConstraint('limit_key', 'window_start', name='email_limit_window_unique'),)

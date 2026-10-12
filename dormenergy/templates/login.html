@@ -14,6 +14,7 @@
     {% for category, message in get_flashed_messages(with_categories=true) %}<div class="form-alert" role="alert">{{ message }}</div>{% endfor %}
     <form method="post" class="login-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label for="email">Email address</label><input id="email" type="email" name="email" autocomplete="username" placeholder="you@example.com" required maxlength="254"><label for="password">Password</label><input id="password" type="password" name="password" autocomplete="current-password" placeholder="Enter your password" required maxlength="128"><div class="login-security">{{ icon('shield') }} Your session is private and protected</div><button class="btn btn-primary btn-full" type="submit">Sign in to workspace {{ icon('arrow') }}</button></form>
     <div class="demo-note">{{ icon('info') }}<div><strong>Your dormitory account</strong><p>Use the account assigned by your administrator. If you need a password reset, contact the administrator.</p>{% if not has_admin %}<p><a class="text-button" href="{{ url_for('web.setup') }}">Set up the first administrator</a></p>{% endif %}</div></div>
+    <p class="login-assistance"><a class="text-button" href="{{ url_for('email_links.forgot') }}">Forgot Password?</a></p>
     <p class="login-assistance">Need access? Contact your dormitory administrator.</p>
     </div><footer class="login-bottom">DormEnergy <span>·</span> Centralized IoT energy management</footer>
   </section>

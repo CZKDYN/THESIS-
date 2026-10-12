@@ -14,13 +14,15 @@ Set the actual PHP/kWh rate under Electricity rates before meter ingestion. A re
 
 ## Create tenant accounts
 
-Choose Assign tenant for the unit, enter the tenant's name/email, and choose a temporary password of 12–128 characters. Share it through your normal secure process. At first sign-in the tenant must replace it before viewing data or making requests. There is no public registration that lets someone choose another tenant's unit.
+Choose Assign tenant, enter the tenant's name/email, and use Send email invitation. The tenant receives a single-use activation link and creates their own password. Until activation, the account stays pending. Inspect the separate email delivery status; queued is not sent. Resend Invitation safely replaces the old link. Configure Resend first using the [email guide](email-system.md).
 
-Manage tenant lets the administrator set a replacement temporary password. Existing tenant sessions are revoked immediately; the tenant must again choose their own password. If the administrator's password is forgotten, use the trusted hosting/database recovery process; no unauthenticated email-reset service is claimed.
+For the compatible manual fallback, deliberately select Use a temporary password instead. Choose 12–128 characters and share securely. The tenant must replace it at first sign-in. This fallback does not verify email ownership. There is no public registration that lets someone choose another tenant's unit.
+
+Manage tenant lets the administrator set a replacement temporary password. Existing tenant sessions are revoked immediately; the tenant must again choose their own password. Forgot Password? supports eligible administrator and tenant accounts with expiring single-use links when delivery is configured. Otherwise use the trusted hosting/database recovery process.
 
 When the tenant moves out, choose End tenancy and confirm. The old login loses access, its pending credit requests are rejected, and its identity/records remain stored. Assign the next tenant afterward. New tenants do not receive the previous tenant's credit-request list or pre-tenancy transaction export. Meter consumption remains unit history.
 
-Credit belongs to the unit's prepaid account. Ending a tenancy does not erase, transfer, or refund its balance. Settle any carryover/refund according to the dormitory's policy before assigning the next tenant. The website does not implement external refunds or payment processing.
+Credit belongs to the unit's prepaid account. Ending a tenancy does not erase, transfer, or refund its balance. Settle any carryover/refund according to the dormitory's policy before assigning the next tenant. The website does not implement external refunds or payment processing. Users can manage nonessential email preferences in Your account; security notices remain enabled.
 
 ## Collect credit requests
 

@@ -33,9 +33,27 @@ def create_app(test_config=None):
         MAX_CONTENT_LENGTH=32 * 1024,
         LOW_BALANCE_THRESHOLD=os.getenv('LOW_BALANCE_THRESHOLD', '100.00'),
         ADMIN_SETUP_TOKEN=os.getenv('ADMIN_SETUP_TOKEN', ''),
+        EMAIL_BACKEND=os.getenv('EMAIL_BACKEND', 'disabled').lower(),
+        RESEND_API_KEY=os.getenv('RESEND_API_KEY', ''),
+        EMAIL_FROM=os.getenv('EMAIL_FROM', ''),
+        PUBLIC_BASE_URL=os.getenv('PUBLIC_BASE_URL', ''),
+        EMAIL_ENCRYPTION_KEY=os.getenv('EMAIL_ENCRYPTION_KEY', ''),
+        ALLOW_TEST_EMAIL=os.getenv('ALLOW_TEST_EMAIL', 'false').lower() == 'true',
+        EMAIL_ACTIVATION_HOURS=int(os.getenv('EMAIL_ACTIVATION_HOURS', '24')),
+        EMAIL_RESET_MINUTES=int(os.getenv('EMAIL_RESET_MINUTES', '30')),
+        EMAIL_RESEND_COOLDOWN=int(os.getenv('EMAIL_RESEND_COOLDOWN', '60')),
+        EMAIL_MAX_ATTEMPTS=int(os.getenv('EMAIL_MAX_ATTEMPTS', '6')),
+        EMAIL_CREDIT_EXHAUSTION=os.getenv('EMAIL_CREDIT_EXHAUSTION', 'false').lower() == 'true',
     )
     if test_config:
         app.config.update(test_config)
+        if test_config.get('TESTING'):
+            # Tests never inherit a production email provider or sender credentials.
+            app.config.update(EMAIL_BACKEND='memory', PUBLIC_BASE_URL='http://localhost:5000',
+                              EMAIL_FROM='DormEnergy <no-reply@example.test>', EMAIL_ENCRYPTION_KEY='')
+            for key in ('EMAIL_BACKEND','PUBLIC_BASE_URL','EMAIL_FROM','EMAIL_ENCRYPTION_KEY'):
+                if key in test_config:
+                    app.config[key] = test_config[key]
     if not app.config['SECRET_KEY'] or app.config['SECRET_KEY'].startswith('replace-'):
         raise RuntimeError('Set a random SECRET_KEY in your environment or .env before starting.')
     if not app.config['SQLALCHEMY_DATABASE_URI']:
@@ -51,7 +69,7 @@ def create_app(test_config=None):
     def load_user(user_id):
         try:
             user = db.session.get(User, int(user_id))
-            if not user or not user.active or session.get('auth_version') != user.session_version or (user.role == 'tenant' and (user.unit.archived_at or user.tenancy_ended_at or (not app.config['SIMULATION_MODE'] and user.unit.is_demo))):
+            if not user or not user.active or user.activation_status != 'active' or session.get('auth_version') != user.session_version or (user.role == 'tenant' and (user.unit.archived_at or user.tenancy_ended_at or (not app.config['SIMULATION_MODE'] and user.unit.is_demo))):
                 return None
             return user
         except (ValueError, TypeError):
@@ -71,13 +89,15 @@ def create_app(test_config=None):
     app.register_blueprint(web)
     app.register_blueprint(api, url_prefix='/api')
     app.register_blueprint(hardware, url_prefix='/api/iot')
+    from .email_links import email_links
+    app.register_blueprint(email_links)
     csrf.exempt(hardware)  # Uses a scoped bearer token, never cookie authentication.
     register_commands(app)
 
     @app.before_request
     def require_password_change():
         from flask_login import current_user
-        if current_user.is_authenticated and current_user.must_change_password and request.endpoint not in ('web.password', 'web.logout', 'static'):
+        if current_user.is_authenticated and current_user.must_change_password and request.endpoint not in ('web.password', 'web.logout', 'static') and not (request.endpoint or '').startswith('email_links.'):
             if request.path.startswith('/api/'):
                 return jsonify(error='Change your temporary password before using your account.', password_change_required=True), 403
             return redirect(url_for('web.password'))
@@ -112,9 +132,9 @@ def create_app(test_config=None):
     def secure_headers(response):
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-Frame-Options'] = 'DENY'
-        response.headers['Referrer-Policy'] = 'same-origin'
+        response.headers['Referrer-Policy'] = 'no-referrer'
         response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; form-action 'self'"
-        if request.path.startswith('/api/') or request.path in ('/dashboard', '/login', '/setup', '/account', '/account/password'):
+        if request.path.startswith('/api/') or request.path in ('/dashboard', '/login', '/setup', '/account', '/account/password', '/activate', '/reset-password', '/forgot-password'):
             response.headers['Cache-Control'] = 'no-store'
         return response
 

@@ -12,10 +12,11 @@ from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import generate_password_hash
 from .extensions import db
-from .models import Account, AuditLog, Device, DeviceEvent, ForecastJob, LoadRequest, Notification, Rate, Reading, Transaction, Unit, User, utcnow
+from .models import Account, AuditLog, Device, DeviceEvent, EmailOutbox, ForecastJob, LoadRequest, Notification, Rate, Reading, Transaction, Unit, User, utcnow
 from .services.billing import DomainError, aware, decimal_value, lock_unit, resolve_load
 from .services.forecasting import forecast_payload
 from .services.accounts import change_password, identity, password_value
+from .services.emailing import ERRORS, cancel_user_mail, configuration_error, invitation_status, issue_link
 
 api = Blueprint('api', __name__)
 MANILA = ZoneInfo('Asia/Manila')
@@ -84,12 +85,15 @@ def unit_json(unit):
     fresh = bool(latest and (utcnow() - aware(latest.timestamp)).total_seconds() < 90)
     online = recent and fresh and not unit.archived_at
     tenant = current_tenant(unit.id)
+    invitation,delivery=invitation_status(tenant) if tenant else (None,None)
     return dict(id=unit.id, name=unit.name, room=unit.room, archived_at=iso(unit.archived_at), tenant=tenant.name if tenant else 'Unassigned',
                 balance=str(account.balance) if account else '0', threshold=str(account.low_threshold) if account else '100',
                 power_status=unit.power_status if online else 'unknown', last_power_status=unit.power_status,
                 online=online, gateway_online=recent,
                 last_seen=iso(device.last_seen) if device else None, reading_at=iso(latest.timestamp) if latest else None,
                 tenant_id=tenant.id if tenant else None, tenant_email=tenant.email if tenant else None,
+                invitation_status=invitation,email_delivery=delivery.status if delivery else None,
+                email_delivery_error=ERRORS.get(delivery.error_code) if delivery and delivery.error_code else None,
                 device=device.identifier if device else 'Not registered', source=device.source if device else 'hardware', token_provisioned=bool(device and device.token_hash),
                 voltage=str(latest.voltage) if latest else None, current=str(latest.current) if latest else None,
                 power=str(latest.power) if latest and online else None, energy=str(latest.energy) if latest else None)
@@ -321,6 +325,7 @@ def archive_unit(unit_id):
     tenant = current_tenant(unit.id)
     if tenant:
         tenant.active = False
+        cancel_user_mail(tenant)
     db.session.add(AuditLog(actor_id=current_user.id, action='unit_archived',
                            detail=f'Unit {unit.id} ({unit.name}) removed; records retained; {len(pending)} pending requests rejected.'))
     db.session.commit()
@@ -336,7 +341,7 @@ def restore_unit(unit_id):
     unit.archived_at = None
     tenant = current_tenant(unit.id)
     if tenant:
-        tenant.active = True
+        tenant.active = tenant.activation_status=='active'
     db.session.add(AuditLog(actor_id=current_user.id, action='unit_restored',
                            detail=f'Unit {unit.id} ({unit.name}) restored with its existing records and account.'))
     db.session.commit()
@@ -349,15 +354,45 @@ def assign_tenant(unit_id):
     lock_unit(unit_id)
     payload = json_payload()
     name, email = identity(payload.get('name'), payload.get('email'))
-    password = password_value(payload.get('password'))
     if current_tenant(unit_id):
         raise DomainError('This unit already has an assigned tenant.', 409)
-    user = User(name=name, email=email, role='tenant', unit_id=unit_id, must_change_password=True)
-    user.set_password(password)
+    method=payload.get('registration_method') or ('temporary_password' if payload.get('password') else 'email')
+    if method not in ('email','temporary_password'):
+        raise DomainError('Choose email invitation or temporary password.')
+    user = User(name=name,email=email,role='tenant',unit_id=unit_id,must_change_password=method=='temporary_password',
+                active=method=='temporary_password',activation_status='active' if method=='temporary_password' else 'pending')
+    user.set_password(password_value(payload.get('password')) if method=='temporary_password' else secrets.token_urlsafe(40))
     db.session.add(user)
+    db.session.flush()
+    delivery=issue_link(user,'activation') if method=='email' else None
     db.session.add(AuditLog(actor_id=current_user.id, action='tenant_assigned', detail=f'Tenant assigned to unit {unit_id}'))
     db.session.commit()
-    return jsonify(message='Tenant account created and assigned.'), 201
+    return jsonify(message=('Pending tenant account created. Invitation queued; delivery is still pending.' if delivery.status=='pending' else 'Pending tenant account created. Invitation was not sent. '+ERRORS.get(delivery.error_code,'Check email configuration.')) if delivery else 'Tenant account created and assigned.',
+                   invitation_status='Pending' if delivery else 'Activated', email_delivery=delivery.status if delivery else None), 201
+
+
+@api.post('/units/<int:unit_id>/tenant/invitation')
+@admin_required
+def resend_invitation(unit_id):
+    lock_unit(unit_id)
+    user=current_tenant(unit_id)
+    if not user or user.activation_status!='pending':
+        raise DomainError('Only a pending tenant account can receive an invitation.',409)
+    delivery=issue_link(user,'activation')
+    db.session.add(AuditLog(actor_id=current_user.id,action='invitation_resent',detail=f'Invitation replaced for tenant {user.id}.'))
+    db.session.commit()
+    return jsonify(message='Replacement invitation queued; delivery is pending.' if delivery.status=='pending' else 'Invitation was not sent. '+ERRORS.get(delivery.error_code,'Check email configuration.'),email_delivery=delivery.status)
+
+
+@api.get('/email-status')
+@admin_required
+def email_status():
+    rows=db.session.scalars(select(EmailOutbox).order_by(EmailOutbox.id.desc()).limit(50)).all()
+    return jsonify(backend=current_app.config['EMAIL_BACKEND'],configured=configuration_error() is None,
+        configuration_message=ERRORS.get(configuration_error(),'Delivery configuration is present; provider acceptance is tracked below.'),
+        messages=[dict(id=row.id,kind=row.kind,status=row.status,attempts=row.attempts,
+                       error=ERRORS.get(row.error_code),created_at=iso(row.created_at),next_attempt_at=iso(row.next_attempt_at),
+                       user_id=row.user_id) for row in rows])
 
 
 @api.post('/units/<int:unit_id>/edit')
@@ -385,6 +420,8 @@ def reset_tenant_password(unit_id):
     if not tenant:
         raise DomainError('Assign a tenant first.', 409)
     tenant = db.session.scalar(select(User).where(User.id == tenant.id).with_for_update().execution_options(populate_existing=True))
+    tenant.active=True
+    tenant.activation_status='active'
     change_password(tenant, json_payload().get('password'), temporary=True)
     db.session.add(AuditLog(actor_id=current_user.id, action='tenant_password_reset', detail=f'Tenant {tenant.id} password reset; sessions revoked.'))
     db.session.commit()
@@ -403,6 +440,7 @@ def end_tenancy(unit_id):
         resolve_load(request_id, 'rejected', current_user)
     tenant.active, tenant.tenancy_ended_at = False, utcnow()
     tenant.session_version += 1
+    cancel_user_mail(tenant)
     db.session.add(AuditLog(actor_id=current_user.id, action='tenancy_ended', detail=f'Tenant {tenant.id} moved out of unit {unit.id}; records and unit balance retained.'))
     db.session.commit()
     return jsonify(message='Tenant access ended. Records and the unit balance are retained; you may assign the next tenant.')

@@ -32,5 +32,6 @@ start_process() {
 }
 start_process app .venv/bin/flask --app wsgi run --host 0.0.0.0 --port 5000
 start_process forecaster .venv/bin/flask --app wsgi forecast-worker --interval 10
+start_process email .venv/bin/flask --app wsgi email-worker --interval 5
 curl --fail --silent --show-error http://127.0.0.1:5000/health
 printf '\n%s\n' 'Development services started. Validate an authenticated dashboard; health alone is not a functional check.'

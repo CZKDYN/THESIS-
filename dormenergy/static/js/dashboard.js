@@ -63,6 +63,8 @@ function setView(next) {
   if (next === 'consumption' && state) renderDetailChart();
   if (next === 'settings') loadRates();
   if (next === 'forecast' && state) renderForecast(state.forecast);
+  if (next === 'notifications' && state?.user.role==='admin') loadEmailStatus();
+  if ($('#email-delivery-card')) $('#email-delivery-card').hidden = next!=='notifications';
 }
 function chartConfiguration(series, canvas, label) {
   const ctx = canvas.getContext('2d');
@@ -196,7 +198,8 @@ function renderUnits() {
     let actions;
     if(archived) actions=`<a class="text-button" href="/api/transactions/export?unit_id=${u.id}&include_archived=true${demo?'&include_demo=true':''}">Export history</a>${demo?'':`<button class="btn btn-secondary btn-small" data-restore="${u.id}">Restore unit</button>`}`;
     else actions=`<button class="btn btn-secondary btn-small" data-edit-unit="${u.id}">Edit unit</button>${u.tenant_id?`<button class="btn btn-secondary btn-small" data-manage-tenant="${u.id}">Manage tenant</button>`:`<button class="btn btn-secondary btn-small" data-assign="${u.id}">Assign tenant</button>`}<button class="btn btn-danger btn-small" data-remove="${u.id}">Remove unit</button>`;
-    return `<tr><td><strong>${html(u.name)}</strong><small>${html(u.room)}</small></td><td>${html(u.tenant)}<small>${html(u.tenant_email||'')}</small></td><td><strong>${pesos(u.balance)}</strong></td><td>${html(u.device)}<small>${html(u.source)}</small></td><td>${badge(archived?'archived':u.power_status)}</td><td><div class="unit-actions">${actions}</div></td></tr>`;
+    if(!archived && u.invitation_status && u.invitation_status!=='Activated') actions+=`<button class="btn btn-secondary btn-small" data-resend-invitation="${u.id}">Resend invitation</button>`;
+    return `<tr><td><strong>${html(u.name)}</strong><small>${html(u.room)}</small></td><td>${html(u.tenant)}<small>${html(u.tenant_email||'')}</small>${u.tenant_id?`<small class="invitation-state">${html(u.invitation_status)}${u.email_delivery?' · '+html(emailLabel(u.email_delivery)):''}</small>${u.email_delivery_error?`<small class="email-warning">${html(u.email_delivery_error)}</small>`:''}`:''}</td><td><strong>${pesos(u.balance)}</strong></td><td>${html(u.device)}<small>${html(u.source)}</small></td><td>${badge(archived?'archived':u.power_status)}</td><td><div class="unit-actions">${actions}</div></td></tr>`;
   }).join('')||empty(demo?'No previous demonstration records.':archived?'No archived units.':'No active units. Register a unit to get started.',6);
 }
 async function refresh() {
@@ -210,6 +213,7 @@ async function refresh() {
     }
     $('#connection-alert').hidden=true;
     render();
+    if(view==='notifications' && state.user.role==='admin')loadEmailStatus();
   } catch(error) {
     $('#connection-alert').hidden=false;
     $('#live-label').textContent='Live updates paused';
@@ -223,6 +227,12 @@ async function loadRates() {
   try {
     const data=await api('/api/rates');
     $('#rate-history').innerHTML=data.rates.map(r=>`<div class="activity-row"><span class="activity-icon green">${icon('bolt')}</span><div class="activity-copy"><strong>${pesos(r.rate)} / kWh</strong><small>Effective ${html(date(r.effective_at))}${new Date(r.effective_at)>new Date()?' · Scheduled':''}</small></div></div>`).join('')||empty('No rates recorded.');
+  }catch(error){toast(error.message,true);}
+}
+function emailLabel(status){return {pending:'Pending delivery',sending:'Sending',sent:'Provider accepted',failed:'Not sent / failed',cancelled:'Cancelled',test:'Test only · not sent'}[status]||status;}
+async function loadEmailStatus(){
+  try{const data=await api('/api/email-status');$('#email-configuration-status').textContent=data.configuration_message;
+    $('#email-delivery-table').innerHTML=data.messages.map(item=>`<tr><td><strong>${html(titleCase(item.kind))}</strong><small>${html(date(item.created_at))}</small></td><td>${html(emailLabel(item.status))}</td><td>${item.attempts}<small>${html(item.error||'')}${item.status==='pending' && item.attempts?' · Retry '+html(date(item.next_attempt_at)):''}</small></td></tr>`).join('')||empty('No emails have been queued.',3);
   }catch(error){toast(error.message,true);}
 }
 function confirm(title, description, callback) {
@@ -251,6 +261,7 @@ document.addEventListener('click',event=>{
   if(button.dataset.assign){const unit=state.units.find(u=>u.id===Number(button.dataset.assign));$('#tenant-form input[name="unit_id"]').value=unit.id;$('#assignment-label').textContent=`Create a tenant account for ${unit.name}.`;$('#tenant-dialog .form-error').hidden=true;$('#tenant-dialog').showModal();}
   if(button.dataset.editUnit){const unit=state.units.find(u=>u.id===Number(button.dataset.editUnit));const form=$('#edit-unit-form');form.elements.unit_id.value=unit.id;form.elements.name.value=unit.name;form.elements.room.value=unit.room;form.elements.threshold.value=unit.threshold;form.querySelector('.form-error').hidden=true;$('#edit-unit-dialog').showModal();}
   if(button.dataset.manageTenant){const unit=state.units.find(u=>u.id===Number(button.dataset.manageTenant));$('#reset-tenant-form').elements.unit_id.value=unit.id;$('#tenant-details').textContent=`${unit.name} · ${unit.tenant} · ${unit.tenant_email}`;$('#manage-tenant-dialog .form-error').hidden=true;$('#manage-tenant-dialog').showModal();}
+  if(button.dataset.resendInvitation){const unit=state.units.find(u=>u.id===Number(button.dataset.resendInvitation));confirm('Resend this invitation?',`Replace the previous link for ${unit.tenant}. The old link stops working. A new email will be queued; provider acceptance is tracked separately.`,async()=>{const result=await api(`/api/units/${unit.id}/tenant/invitation`,{});toast(result.message,result.email_delivery==='failed');});}
   if(button.dataset.deviceToken){const unit=state.units.find(u=>u.id===Number(button.dataset.deviceToken));$('#device-token-form').elements.unit_id.value=unit.id;$('#device-token-label').textContent=`${unit.name} · ${unit.device}`;$('#device-token-dialog .form-error').hidden=true;$('#device-token-dialog').showModal();}
   if(button.dataset.remove){const unit=state.units.find(u=>u.id===Number(button.dataset.remove));
     confirm(`Remove ${unit.name}?`,'This archives the unit and retains its balance and history. Tenant access and meter updates will stop. Pending load requests will be rejected. You can restore the unit from Archived units.',async()=>{const result=await api(`/api/units/${unit.id}/archive`,{});$('#unit-filter').value='';toast(result.message);});}
@@ -262,14 +273,16 @@ function bindForm(selector, endpoint, payloadBuilder, onSuccess) {
   form.addEventListener('submit',async event=>{
     event.preventDefault();const button=form.querySelector('button[type="submit"], .dialog-actions .btn-primary');const errorBox=form.querySelector('.form-error');
     button.disabled=true;errorBox.hidden=true;
-    try{const values=Object.fromEntries(new FormData(form));const result=await api(typeof endpoint==='function'?endpoint(values):endpoint,payloadBuilder(values));form.closest('dialog').close();form.reset();toast(result.message);onSuccess?.(result);await refresh();}
+    try{const values=Object.fromEntries(new FormData(form));const result=await api(typeof endpoint==='function'?endpoint(values):endpoint,payloadBuilder(values));form.closest('dialog').close();form.reset();toast(result.message,result.email_delivery==='failed');onSuccess?.(result);await refresh();}
     catch(error){errorBox.textContent=error.message;errorBox.hidden=false;}
     finally{button.disabled=false;}
   });
 }
 bindForm('#load-form','/api/load-requests',v=>({amount:v.amount,note:v.note,reference:requestReference}),()=>{requestReference=crypto.randomUUID();setView('loads');});
 bindForm('#unit-form','/api/units',v=>v,()=>{if($('#unit-filter'))$('#unit-filter').value='';setView('units');});
-bindForm('#tenant-form',v=>`/api/units/${v.unit_id}/tenant`,v=>({name:v.name,email:v.email,password:v.password}));
+bindForm('#tenant-form',v=>`/api/units/${v.unit_id}/tenant`,v=>({name:v.name,email:v.email,registration_method:v.registration_method,...(v.registration_method==='temporary_password'?{password:v.password}:{})}),()=>onboardingMethod());
+function onboardingMethod(){const manual=$('#tenant-registration-method')?.value==='temporary_password';if(!$('#tenant-password'))return;$('#tenant-password-fields').hidden=!manual;$('#tenant-password').disabled=!manual;$('#tenant-password').required=manual;$('#tenant-invitation-help').hidden=manual;}
+$('#tenant-registration-method')?.addEventListener('change',onboardingMethod);
 bindForm('#edit-unit-form',v=>`/api/units/${v.unit_id}/edit`,v=>({name:v.name,room:v.room,threshold:v.threshold}));
 bindForm('#reset-tenant-form',v=>`/api/units/${v.unit_id}/tenant/password`,v=>({password:v.password}));
 bindForm('#device-token-form',v=>`/api/units/${v.unit_id}/device-token`,v=>({action:v.action,current_password:v.current_password}),result=>{

@@ -9,6 +9,7 @@ from .extensions import db
 from .models import AuditLog, Unit, User, utcnow
 from .services.accounts import change_password, identity, password_value
 from .services.billing import DomainError
+from .services.emailing import cancel_user_mail, security_email
 
 web = Blueprint('web', __name__)
 # A fixed dummy hash keeps unknown-account password checks similarly expensive.
@@ -30,7 +31,7 @@ def login():
             return render_template('login.html'), 429
         user = db.session.scalar(select(User).where(User.email == email))
         valid = check_password_hash(user.password_hash if user else DUMMY_HASH, password)
-        if not user or not valid or not user.active or (user.role == 'tenant' and (user.unit.archived_at or user.tenancy_ended_at or (not current_app.config['SIMULATION_MODE'] and user.unit.is_demo))):
+        if not user or not valid or not user.active or user.activation_status!='active' or (user.role == 'tenant' and (user.unit.archived_at or user.tenancy_ended_at or (not current_app.config['SIMULATION_MODE'] and user.unit.is_demo))):
             db.session.add(AuditLog(action='login_failed', detail=email))
             db.session.commit()
             flash('Email or password is incorrect.', 'error')
@@ -95,6 +96,7 @@ def setup():
             db.session.add(user)
             db.session.flush()
             db.session.add(AuditLog(actor_id=user.id, action='admin_created', detail='First administrator created through owner setup.'))
+            security_email(user,'welcome',key=f'admin-welcome:{user.id}')
             db.session.commit()
             session.clear()
             login_user(user)
@@ -116,7 +118,15 @@ def account():
             db.session.scalar(select(User).where(User.id == current_user.id).with_for_update().execution_options(populate_existing=True))
             if not current_user.check_password(request.form.get('current_password', '')):
                 raise DomainError('Your current password is incorrect.', 403)
+            old_email=current_user.email
             current_user.name, current_user.email = identity(request.form.get('name'), request.form.get('email'))
+            if old_email!=current_user.email:
+                from uuid import uuid4
+                cancel_user_mail(current_user,preserve_security_history=True)
+                current_user.email_verified_at=None
+                event=uuid4().hex
+                security_email(current_user,'email',recipient=old_email,key=f'email-change:{event}:old')
+                security_email(current_user,'email',key=f'email-change:{event}:new')
             db.session.add(AuditLog(actor_id=current_user.id, action='profile_updated', detail='Account name and email updated.'))
             db.session.commit()
             flash('Your account details were saved.', 'success')
@@ -152,3 +162,15 @@ def password():
             flash(error.message, 'error')
             return render_template('account.html', kind='password'), error.status
     return render_template('account.html', kind='password')
+
+
+@web.post('/account/preferences')
+@login_required
+def preferences():
+    user=db.session.scalar(select(User).where(User.id==current_user.id).with_for_update().execution_options(populate_existing=True))
+    user.email_balance_alerts=request.form.get('email_balance_alerts')=='on'
+    user.email_load_updates=request.form.get('email_load_updates')=='on'
+    db.session.add(AuditLog(actor_id=user.id,action='email_preferences_changed',detail='Nonessential email preferences updated. Security notifications remain enabled.'))
+    db.session.commit()
+    flash('Email preferences saved. Essential security emails remain enabled.','success')
+    return redirect(url_for('web.account'))

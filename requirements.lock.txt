@@ -23,6 +23,9 @@ SQLAlchemy==2.1.4
 typing_extensions==4.16.0
 Werkzeug==3.1.9
 WTForms==3.2.2
+cryptography==46.0.3
+cffi==2.0.0
+pycparser==2.23
 numpy==2.3.4
 scipy==1.16.3
 xgboost-cpu==3.1.1; sys_platform == 'linux'

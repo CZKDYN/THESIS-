@@ -4,7 +4,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from flask import current_app
 from sqlalchemy import select
 from ..extensions import db
-from ..models import Account, AuditLog, Device, DeviceEvent, LoadRequest, Notification, Rate, Reading, Transaction, Unit, utcnow
+from ..models import Account, AuditLog, Device, DeviceEvent, LoadRequest, Notification, Rate, Reading, Transaction, Unit, User, utcnow
 
 MONEY_PRECISION = Decimal('0.000001')
 
@@ -132,9 +132,23 @@ def ingest_reading(device_id, payload, source):
         db.session.add(DeviceEvent(device_id=device.id, kind='meter_reset', state='confirmed', message='New meter epoch accepted; baseline charged at zero.'))
     if previous_balance > account.low_threshold >= account.balance:
         db.session.add(Notification(unit_id=unit.id, kind='low_balance', message='Your prepaid credit is low. Submit a load request to keep your account funded.'))
+        if source=='hardware' and not unit.is_demo and current_app.config['EMAIL_BACKEND']!='disabled':
+            from .emailing import queue_balance_alert
+            tenant=db.session.scalar(select(User).where(User.unit_id==unit.id,User.role=='tenant',User.tenancy_ended_at.is_(None)))
+            if tenant:
+                queue_balance_alert(tenant,unit,account,reading)
     if previous_balance > 0 >= account.balance:
         db.session.add(DeviceEvent(device_id=device.id, kind='credit_exhausted', state='requires_review', message='Disconnection procedure required. No physical actuation command issued.'))
         db.session.add(Notification(unit_id=unit.id, kind='credit_exhausted', message='Credit exhausted. The approved disconnection procedure requires operator review.'))
+        if source=='hardware' and not unit.is_demo and current_app.config['EMAIL_CREDIT_EXHAUSTION']:
+            from .emailing import queue_balance_alert, queue_email
+            tenant=db.session.scalar(select(User).where(User.unit_id==unit.id,User.role=='tenant',User.tenancy_ended_at.is_(None)))
+            if tenant:
+                queue_balance_alert(tenant,unit,account,reading,exhausted=True)
+            if utcnow()-aware(reading.timestamp)<=timedelta(minutes=5) and current_app.config['EMAIL_BACKEND']!='disabled':
+                for admin in db.session.scalars(select(User).where(User.role=='admin',User.active.is_(True),User.email_balance_alerts.is_(True))).all():
+                    queue_email(admin,'credit_exhausted','Unit prepaid credit exhausted','Review the unit and its prepaid balance. No physical disconnection command was issued.',
+                        details=[('Unit',unit.name),('Room',unit.room),('Balance',f'PHP {account.balance:,.2f}')],dedupe_key=f'exhausted-admin:{reading.id}:{admin.id}')
     if status != previous_status:
         db.session.add(DeviceEvent(device_id=device.id, kind='power_status', state=status, message='Device-reported supply status changed.'))
         db.session.add(Notification(unit_id=unit.id, kind='power_status', message=f'Electricity status reported as {status.replace("_", " ")}.'))
@@ -161,4 +175,7 @@ def resolve_load(request_id, decision, actor):
     load.status, load.resolved_by, load.resolved_at = decision, actor.id, utcnow()
     db.session.add(Notification(unit_id=load.unit_id, kind=f'load_{decision}', message=f'Your ₱{load.amount:,.2f} load request was {decision}.'))
     db.session.add(AuditLog(actor_id=actor.id, action=f'load_{decision}', detail=f'Request {load.id}, unit {load.unit_id}, PHP {load.amount}'))
+    if not load.unit.is_demo and current_app.config['EMAIL_BACKEND']!='disabled':
+        from .emailing import queue_load_update
+        queue_load_update(load,account)
     return load

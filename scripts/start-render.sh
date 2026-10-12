@@ -14,12 +14,13 @@ fi
 python -m flask --app wsgi db upgrade
 web_pid=''
 forecast_pid=''
+email_pid=''
 cleanup() {
   trap - EXIT
-  for pid in "$web_pid" "$forecast_pid"; do
+  for pid in "$web_pid" "$forecast_pid" "$email_pid"; do
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then kill -TERM "$pid" 2>/dev/null || true; fi
   done
-  for pid in "$web_pid" "$forecast_pid"; do
+  for pid in "$web_pid" "$forecast_pid" "$email_pid"; do
     if [[ -n "$pid" ]]; then wait "$pid" 2>/dev/null || true; fi
   done
 }
@@ -35,9 +36,11 @@ python -m gunicorn --workers "$workers" --bind "0.0.0.0:$port" --access-logfile 
 web_pid=$!
 python -m flask --app wsgi forecast-worker --interval 10 &
 forecast_pid=$!
+python -m flask --app wsgi email-worker --interval 5 &
+email_pid=$!
 # Fail if any required child exits, allowing the host to restart the service.
 set +e
-wait -n "$web_pid" "$forecast_pid"
+wait -n "$web_pid" "$forecast_pid" "$email_pid"
 status=$?
 set -e
 if (( status == 0 )); then status=1; fi

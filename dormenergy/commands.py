@@ -16,6 +16,26 @@ from .services.forecasting import forecast_worker_step, generate_forecasts, trai
 
 
 def register_commands(app):
+    @app.cli.command('email-worker')
+    @click.option('--interval',default=5.0,type=click.FloatRange(min=1,max=60))
+    @click.option('--once',is_flag=True)
+    def email_worker(interval,once):
+        """Deliver committed outbox messages separately from billing/forecasting."""
+        from .services.emailing import email_worker_step
+        click.echo('Email outbox worker running. Provider accepted and test-only states are separate.')
+        while True:
+            try:
+                email_worker_step()
+            except Exception:
+                db.session.rollback()
+                db.session.remove()
+                current_app.logger.error('email_worker_step_failed; check database/configuration. No message bodies are logged.')
+                if once:
+                    raise click.ClickException('Email worker failed; no sensitive details were logged.') from None
+            if once:
+                break
+            time.sleep(interval)
+
     @app.cli.command('train-forecast')
     @click.option('--unit-id', required=True, type=int)
     def train_forecast(unit_id):
