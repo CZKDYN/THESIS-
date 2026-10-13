@@ -1,6 +1,7 @@
 # Improve DormEnergy operational dashboards and accessible reporting
 
-Base: `feature/software-stabilization`  
+Base: `feature/software-stabilization`
+
 Head: `feature/website-experience`
 
 The dashboard previously counted only the newest requests, represented credit on a fixed PHP1,000 bar, and offered truncated histories without filters. It now shows complete scoped pending totals and current operational tasks, actual tenant credit/thresholds, observed usage and historical ledger deductions, and filtered paginated requests/transactions with matching CSV export.
