@@ -1,0 +1,14 @@
+{% macro filters(prefix, title, kind=False) %}
+<form class="history-filters" id="{{ prefix }}-filters" aria-label="{{ title }}">
+  <div class="filter-search"><label for="{{ prefix }}-search">Search</label><input id="{{ prefix }}-search" name="q" type="search" maxlength="120" placeholder="Unit or reference" autocomplete="off"></div>
+  <div><label for="{{ prefix }}-kind">{{ 'Transaction type' if kind else 'Request status' }}</label><select id="{{ prefix }}-kind" name="{{ 'kind' if kind else 'status' }}">{% if kind %}<option value="">All transactions</option><option value="credit">Credit additions</option><option value="consumption">Energy deductions</option>{% else %}<option value="">All requests</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option>{% endif %}</select></div>
+  <div><label for="{{ prefix }}-from">From date</label><input id="{{ prefix }}-from" name="date_from" type="date"></div>
+  <div><label for="{{ prefix }}-to">To date</label><input id="{{ prefix }}-to" name="date_to" type="date"></div>
+  <button class="btn btn-secondary" type="reset">Clear filters</button>
+  <p class="filter-help">Dates use Asia/Manila. The unit selector above applies to these results.{% if kind %} CSV exports the latest matching records, up to 10,000, across pages.{% endif %}</p>
+</form>
+<p id="{{ prefix }}-status" class="history-status" role="status" aria-live="polite">Loading recorded history…</p>
+{% endmacro %}
+{% macro pagination(prefix) %}
+<div class="pagination" aria-label="{{ prefix|capitalize }} pages"><span id="{{ prefix }}-page-label">Page 1</span><div><button class="btn btn-secondary btn-small" id="{{ prefix }}-previous" type="button" disabled>Previous page</button><button class="btn btn-secondary btn-small" id="{{ prefix }}-next" type="button" disabled>Next page</button></div></div>
+{% endmacro %}

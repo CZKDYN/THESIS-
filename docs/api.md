@@ -10,11 +10,13 @@ Real mode excludes retired demonstration units and seeded tariffs from the works
 | --- | --- | --- |
 | GET | `/health` | Database connectivity and active environment mode. Not a functional readiness check. |
 | GET | `/api/snapshot` | Admin: active units (empty list is valid). Tenant: active assigned unit only. Optional `unit_id` is authorized server-side. Includes the selected unit's forecast, or `select_unit` for an aggregate view. |
+| GET | `/api/transactions` | Scoped, paginated ledger; `q`, `kind`, `date_from`, `date_to`, authorized `unit_id`, `page`, `per_page` and optional `anchor`. |
+| GET | `/api/load-requests` | Scoped, paginated requests; same date/search/unit/page fields and `status=pending|approved|rejected`. Includes actual `credited_amount` and `reviewed_at`. |
 | GET | `/api/forecast` | Scoped unit forecast, model/evaluation metadata, latest job status, source label, and horizon-limited duration. Admins may select `unit_id`; tenants cannot access another unit. Archived units return 404. |
 | POST | `/api/units/<id>/forecast/train` | Admin + CSRF; queues training for an active metered unit, returns 202 and `job_id`. An existing pending/running job is reused. Synthetic jobs require simulation mode. |
 | POST | `/api/load-requests` | Tenant submits `amount`, optional `note`, and unique client `reference`. Unit comes from the session, not the payload. |
 | POST | `/api/load-requests/<id>/review` | Admin; `decision` is `approved` or `rejected`. Second review returns 409. |
-| GET | `/api/transactions/export` | Scoped CSV, optional authorized `unit_id`, at most 10,000 records. Admins may use `include_archived=true` to export retained history. |
+| GET | `/api/transactions/export` | Scoped CSV with the ledger's same search/type/Manila-date/unit filters, at most 10,000 latest matches. Admins may use `include_archived=true` to export retained history. |
 | GET / POST | `/api/rates` | Admin GET returns history, utility policy/reference and active billing rate. POST is blocked with 403 in default locked mode. Deliberate legacy/manual mode alone accepts `{ "rate": "12.85", "effective_at": "future timezone-aware ISO timestamp" }`. |
 | POST | `/api/units` | Admin; `name`, `room`, `device_id`. Creates a hardware device and zero-credit account. |
 | GET | `/api/units` | Admin; `status=active` (default), `archived`, or `demo` for retained demonstration history. Demo history has no restore operation in real mode. |
@@ -95,3 +97,13 @@ For a confirmed physical meter reset, use a **new** stable `meter_epoch` and `re
 - Credit belongs to the unit; ending a tenancy neither erases nor refunds the balance. Settle carryover externally according to dormitory policy before assigning the next tenant.
 
 Use the scoped CSV export and structured `meter_rejected` logs for software evaluation. Device tokens, production passwords, and `.env` contents must never enter test records. No simulator runs in normal deployment.
+
+## Website reporting additions
+
+The existing snapshot fields remain compatible. Additive `operations` and `actions` summarize current selected-unit states, not historical notification severity. `insights` contains nullable seven/30-day observed kWh, actual consumption-ledger deductions for today/seven/30 days, and the latest recorded credit. Periods are Manila calendar days including today; partial observations are labeled and no unsupported previous-period percentage is asserted. Charts add bucket timestamps and observed-unit counts. Per-unit measurement state, original `reading_at`, `last_received`, communication evidence and model age are separate. The legacy `gateway_online` flag means recent API receipt only. Latest observations and aggregates must match the configured device source; future observations do not enter usage aggregates.
+
+Both new GET endpoints return their named array and `pagination: {page, per_page, total, pages, timezone, anchor}`. Defaults are page 1 and 25 rows; page size is limited to 100. Sort order is timestamp then ID descending. `anchor` bounds subsequent pages to the first response's highest matching ID, preventing newly inserted records from shifting deeper pages. Status changes are live, so this is not a transactionally frozen database snapshot. A filter change or an unfocused refresh of page 1 starts a new anchor.
+
+Dates are inclusive `YYYY-MM-DD` Manila dates converted to a half-open UTC interval; invalid/reversed ranges return 422. Search is at most 120 characters, with SQL-bound values and literal `%`, `_` and backslash. Transaction search includes description, available load reference and unit name; request search includes available reference, unit name and room. Tenant requests belong to the authenticated user, and ledger history starts at that tenant's account/tenancy date, preserving the prior access policy. Foreign unit IDs return 403. No billing/account state is changed by a GET.
+
+CSV keeps its existing seven-column contract and exact decimal strings; its timestamp header explicitly remains `timestamp_utc`. It exports fresh matching records across pages rather than the browser's historical page anchor. The 10,000-record limit and formula-prefix escaping remain in place. Archived/demo exports retain their existing administrator-only flags. No new migration or production dependency is needed. See [the implementation and evidence](website-experience.md).

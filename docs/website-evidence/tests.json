@@ -1,0 +1,229 @@
+{
+  "recorded_for": "14 October 2026, Asia/Manila",
+  "branch": "feature/website-experience",
+  "integration_base": "feature/software-stabilization",
+  "base_sha": "d7527b48080cadbff36db7b221bb72eb6ed40202",
+  "main_sha": "24f6ecf4ff565d7f9ea538c163a5ae8a47d62152",
+  "python": "3.12.14",
+  "platform": "linux",
+  "postgresql_major": 17,
+  "playwright": "1.62.0",
+  "axe": "4.14.0",
+  "suites": {
+    "backend": {
+      "tests": 145,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 145,
+      "seconds": 87.808
+    },
+    "portable": {
+      "tests": 145,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 9,
+      "passed": 136,
+      "seconds": 77.413
+    },
+    "gateway": {
+      "tests": 68,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 68,
+      "seconds": 0.301
+    },
+    "network": {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 1,
+      "seconds": 132.266
+    }
+  },
+  "browser_checks": 42,
+  "browsers": {
+    "real": {
+      "checks_passed": 10,
+      "checks": [
+        "Owner setup and an empty real workspace with no fabricated measurements",
+        "All navigation, unit registration, and unit/threshold editing",
+        "Tenant creation, mandatory private password, and unit isolation",
+        "Actual tariff configuration and tenant request/credit approval",
+        "One-time gateway credentials, authenticated reading ingestion, decimal billing, and CSV export",
+        "XGBoost rejects insufficient real history without inventing predictions or metrics",
+        "Administrator reset, session revocation, tenant turnover, and previous-request privacy",
+        "Unit archive/restore and gateway credential revocation",
+        "Mobile admin/tenant layouts and account profile editing",
+        "No JavaScript or browser console errors"
+      ],
+      "errors": [],
+      "physical_meter_test": false
+    },
+    "email": {
+      "checks_passed": 7,
+      "checks": [
+        "Email-first tenant registration is pending, with explicit test-only delivery status",
+        "Expired invitation state and safe resending through the administrator UI",
+        "Responsive activation, private password, unit isolation, and secrets excluded from request URLs",
+        "Activated tenant status and non-sensitive delivery monitoring",
+        "Mobile notification preferences with essential security emails retained",
+        "Forgot-password link, generic confirmation, administrator recovery, and session revocation",
+        "No JavaScript page errors in the new onboarding and recovery flows"
+      ],
+      "errors": [],
+      "backend": "memory",
+      "real_emails_sent": 0
+    },
+    "https": {
+      "checks_passed": 8,
+      "checks": [
+        "HTTPS browser login succeeds with secure cookies and its automatic same-origin referrer",
+        "Meralco PHP 14.74 reference is read-only and a forged rate update is rejected without activating billing",
+        "Locked utility rate and pending-confirmation explanation fit a phone layout",
+        "Authenticated HTTPS form saves preferences with strict form protection enabled",
+        "HTTPS activation checks and redeems a fragment link without exposing the token in referrers",
+        "Activated tenant signs in on HTTPS and sees only their unit in a phone layout",
+        "HTTPS password recovery revokes the old session and permits the new password",
+        "All observed URLs/referrers exclude private links and the browser reports no JavaScript errors"
+      ],
+      "errors": [],
+      "real_emails_sent": 0,
+      "secure_cookies": true,
+      "https_strict_csrf": true,
+      "physical_meter_test": false
+    },
+    "forecast": {
+      "checks_passed": 4,
+      "checks": [
+        "Recursive multi-hour metrics and baselines rendered",
+        "Synthetic source and uncertainty limits explicit",
+        "Both forecast charts rendered",
+        "Phone layout and JavaScript error checks passed"
+      ],
+      "errors": [],
+      "real_emails_sent": 0,
+      "production_readings": 0
+    },
+    "experience": {
+      "checks_passed": 13,
+      "checks": [
+        "Admin operations use current states and complete pending counts; no fixed credit bar or historical task inference",
+        "Transaction pagination, literal search, date validation, exact filters/export and focused-input preservation",
+        "Admin approval retains confirmation, actual ledger credit and current review timestamp",
+        "Actual synthetic XGBoost artifact renders explicit baseline caution, four recursive horizons, model age and estimates",
+        "Expired model presentation suppresses current predictions even in an inconsistent available reply",
+        "Fresh/stale/awaiting distinction and separate original/receipt timestamps without invented gateway health",
+        "Native dialog Escape/focus behavior and unsaved edits survive background updates",
+        "503 and malformed success replies preserve recorded balances, mark live status unconfirmed, and Retry restores updates",
+        "Serialized polling discards an older unit-filter reply; unknown numeric values and precise small ledger amounts remain distinct from zero",
+        "Five requested viewport widths, keyboard drawer focus/Escape/inert and accessible chart summaries",
+        "Tenant unit/financial history scope, actual top-up and threshold display; no administrator credential controls",
+        "Tenant native/server validation associates errors and preserves edits; quick amounts/submission feedback work and pending requests never add credit",
+        "Categorized historical notifications without fabricated unread state or unresolved-task inference"
+      ],
+      "errors": [],
+      "accessibility": [
+        {
+          "view": "login",
+          "violations": []
+        },
+        {
+          "view": "admin-overview",
+          "violations": []
+        },
+        {
+          "view": "transactions",
+          "violations": []
+        },
+        {
+          "view": "load-inbox",
+          "violations": []
+        },
+        {
+          "view": "forecast",
+          "violations": []
+        },
+        {
+          "view": "devices",
+          "violations": []
+        },
+        {
+          "view": "edit-unit-dialog",
+          "violations": []
+        },
+        {
+          "view": "mobile-navigation",
+          "violations": []
+        },
+        {
+          "view": "mobile-consumption",
+          "violations": []
+        },
+        {
+          "view": "mobile-load-dialog",
+          "violations": []
+        },
+        {
+          "view": "tenant-overview",
+          "violations": []
+        },
+        {
+          "view": "mobile-notifications",
+          "violations": []
+        },
+        {
+          "view": "mobile-account",
+          "violations": []
+        },
+        {
+          "view": "mobile-recovery",
+          "violations": []
+        },
+        {
+          "view": "mobile-invalid-activation",
+          "violations": []
+        }
+      ],
+      "screenshots": [
+        "admin-overview-1440.png",
+        "admin-transactions-1440.png",
+        "forecast-1440.png",
+        "devices-1440.png",
+        "admin-history-360.png",
+        "admin-overview-360.png",
+        "admin-history-390.png",
+        "admin-overview-390.png",
+        "admin-history-768.png",
+        "admin-overview-768.png",
+        "admin-history-1024.png",
+        "admin-overview-1024.png",
+        "admin-history-1440.png",
+        "admin-overview-1440.png",
+        "tenant-overview-390.png",
+        "tenant-overview-360.png",
+        "tenant-overview-390.png",
+        "tenant-overview-768.png",
+        "tenant-overview-1024.png",
+        "tenant-overview-1440.png"
+      ],
+      "synthetic_fixture_data": true,
+      "production_readings": 0,
+      "real_emails_sent": 0,
+      "viewport_widths": [
+        360,
+        390,
+        768,
+        1024,
+        1440
+      ]
+    }
+  },
+  "synthetic_fixtures_only": true,
+  "production_readings": 0,
+  "real_emails_sent": 0,
+  "hosted_ci_verified": false,
+  "physical_hardware_verified": false
+}

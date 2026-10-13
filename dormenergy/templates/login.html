@@ -2,7 +2,7 @@
 {% from '_icons.html' import icon %}
 {% block bodyclass %}login-page{% endblock %}
 {% block body %}
-<main class="login-layout">
+<main class="login-layout" id="main-content" tabindex="-1">
   <section class="login-story" aria-label="About DormEnergy">
     <a class="brand" href="{{ url_for('web.login') }}"><span class="brand-icon">{{ icon('bolt') }}</span><span>Dorm<span class="brand-accent">Energy</span><small>SMART PREPAID SUBMETERING</small></span></a>
     <div class="story-content"><span class="eyebrow"><span class="status-dot"></span> BETTER ENERGY. BETTER LIVING.</span><h1>A smarter way<br>to power your<br><span>everyday.</span></h1><p>Understand your electricity. Stay in control of your credit. Make every kilowatt count.</p>

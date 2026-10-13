@@ -1,0 +1,19 @@
+{% if admin %}
+<section class="operations-strip" aria-label="Operations summary">
+  <div><strong id="op-units">—</strong><span>Active units</span></div>
+  <div><strong id="op-stale">—</strong><span>Stale measurements</span></div>
+  <div><strong id="op-low">—</strong><span>Low-credit units</span></div>
+  <div><strong id="op-pending">—</strong><span>Pending top-ups</span></div>
+  <div><strong id="op-activation">—</strong><span>Awaiting activation</span></div>
+</section>
+{% else %}
+<section class="card balance-context" aria-label="Your prepaid credit">
+  <div><h2 id="balance-warning">Checking your credit</h2><p id="balance-threshold">Loading your unit's warning threshold…</p><p id="latest-topup">Checking recorded top-ups…</p></div>
+  <button class="btn btn-primary" data-open="load-dialog">{{ icon('plus') }} Request a top-up</button>
+</section>
+{% endif %}
+<section class="insights-grid" aria-label="Recorded usage and expenses">
+  <article class="insight-card"><span>Recorded use · 7 days</span><strong><span id="insight-seven">—</span> <small>kWh</small></strong><p>Calendar days, including today</p></article>
+  <article class="insight-card"><span>Recorded use · 30 days</span><strong><span id="insight-thirty">—</span> <small>kWh</small></strong><p>Gaps are not treated as zero use</p></article>
+  <article class="insight-card"><span>Energy deductions · 7 days</span><strong id="insight-expense">—</strong><p id="insight-expense-month">From the recorded billing ledger</p></article>
+</section>

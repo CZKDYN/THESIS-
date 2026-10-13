@@ -123,3 +123,7 @@ Remaining work outside the web workflows includes physical firmware/gateway inst
 ## Stabilization review
 
 The unmerged `feature/software-stabilization` branch integrates the gateway and website and adds measured correctness/security/performance fixes. Gateway package version: **0.1.1**. See the [audit and engineering ratings](docs/software-audit.md), [test/failure-scenario record](docs/software-validation.md), [committed measurement evidence](docs/audit-evidence/), and [controlled release/rollback checklist](docs/release-readiness.md). Review this branch and its checks before merging or deploying; a branch push does not deploy Render.
+
+## Website experience review
+
+`feature/website-experience` targets the unmerged stabilization branch. It adds current operational tasks, clear tenant credit/usage/ledger summaries, evidence-based device states, transparent forecast comparisons, filtered paginated histories, responsive layouts and resilient keyboard-friendly updates. Read the [audit, implementation, actual browser screenshots and validation](docs/website-experience.md) before reviewing the branch. The [PR description](docs/website-experience-pr.md) and controlled release checklist are included. This branch has not been merged or deployed to Render.

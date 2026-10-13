@@ -1,0 +1,12 @@
+<article class="card evaluation-card" id="forecast-evaluation-card" hidden>
+  <div class="card-heading"><div><h2>How did the model perform?</h2><p>Historical evaluation, not a guarantee of future accuracy. Lower errors are better.</p></div></div>
+  <div class="evaluation-body">
+    <p id="forecast-caution" class="insight-notice" role="note"></p>
+    <h3>Next-hour comparison</h3>
+    <div class="table-wrap" tabindex="0" role="region" aria-label="Next-hour error comparison"><table><caption class="sr-only">XGBoost and simple baselines on historical data</caption><thead><tr><th scope="col">Model</th><th scope="col">MAE · kWh</th><th scope="col">RMSE · kWh</th><th scope="col">MAPE</th><th scope="col">Samples</th></tr></thead><tbody id="forecast-comparison-table"></tbody></table></div>
+    <p id="forecast-comparison-note" class="field-help"></p>
+    <h3>Recursive forecasts · 1, 6, 12 and 24 hours</h3>
+    <div class="table-wrap" tabindex="0" role="region" aria-label="Recursive forecast errors"><table><caption class="sr-only">Endpoint and cumulative forecast errors at each horizon</caption><thead><tr><th scope="col">Horizon</th><th scope="col">Endpoint MAE / RMSE</th><th scope="col">Cumulative MAE / RMSE</th><th scope="col">Persistence MAE</th><th scope="col">Seasonal MAE</th><th scope="col">Origins</th></tr></thead><tbody id="forecast-recursive-table"></tbody></table></div>
+    <p class="field-help">All error values are in kWh. An endpoint is the final hour; cumulative error covers the whole horizon. Seasonal comparisons may use fewer matched origins. No calibrated confidence intervals are available.</p>
+  </div>
+</article>

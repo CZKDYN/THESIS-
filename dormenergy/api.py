@@ -8,17 +8,18 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 from flask import Blueprint, Response, abort, current_app, jsonify, request, session
 from flask_login import current_user, login_required
-from sqlalchemy import select, func
+from sqlalchemy import select, func, case, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from werkzeug.security import generate_password_hash
 from .extensions import db
-from .models import Account, AuditLog, Device, DeviceEvent, EmailOutbox, ForecastJob, LoadRequest, Notification, Rate, Reading, Transaction, Unit, User, utcnow
+from .models import Account, AuditLog, Device, DeviceEvent, EmailOutbox, ForecastJob, ForecastModel, LoadRequest, Notification, Rate, Reading, Transaction, Unit, User, utcnow
 from .services.billing import DomainError, aware, decimal_value, lock_unit, resolve_load
 from .services.forecasting import forecast_payload
 from .services.accounts import change_password, identity, password_value
 from .services.emailing import ERRORS, cancel_user_mail, configuration_error, invitation_status, issue_link
 from .services.utility_rates import billing_rates, rate_covers, utility_policy
+from .services.reporting import paginate, request_query as filtered_requests, transaction_query as filtered_transactions
 
 api = Blueprint('api', __name__)
 MANILA = ZoneInfo('Asia/Manila')
@@ -71,23 +72,24 @@ def iso(value):
     return aware(value).isoformat() if value else None
 
 
-def transaction_json(item):
+def transaction_json(item, reference=None):
     return dict(id=item.id, unit_id=item.unit_id, unit=item.unit.name, kind=item.kind,
                 amount=str(item.amount), balance_after=str(item.balance_after),
-                description=item.description, timestamp=iso(item.created_at))
+                description=item.description, timestamp=iso(item.created_at), reference=reference)
 
 
-def load_json(item):
+def load_json(item, credited_amount=None):
     return dict(id=item.id, unit_id=item.unit_id, unit=item.unit.name, tenant=item.user.name,
                 amount=str(item.amount), status=item.status, reference=item.reference,
-                note=item.note, timestamp=iso(item.created_at))
+                note=item.note, timestamp=iso(item.created_at), reviewed_at=iso(item.resolved_at),
+                credited_amount=str(credited_amount) if credited_amount is not None else None)
 
 
 def snapshot_context(units):
     """Batch per-unit lookups; reuse the existing device/time unique index."""
     ids = [unit.id for unit in units]
     device_ids = [unit.device.id for unit in units if unit.device]
-    latest_id = select(Reading.id).where(Reading.device_id == Device.id).order_by(Reading.timestamp.desc()).limit(1).correlate(Device).scalar_subquery()
+    latest_id = select(Reading.id).where(Reading.device_id == Device.id, Reading.source == Device.source).order_by(Reading.timestamp.desc()).limit(1).correlate(Device).scalar_subquery()
     latest_ids = select(latest_id).select_from(Device).where(Device.id.in_(device_ids))
     readings = db.session.scalars(select(Reading).where(Reading.id.in_(latest_ids))).all() if device_ids else []
     tenants = db.session.scalars(select(User).where(User.unit_id.in_(ids), User.role == 'tenant', User.tenancy_ended_at.is_(None))).all() if ids else []
@@ -96,10 +98,12 @@ def snapshot_context(units):
 
 def unit_json(unit, context=None):
     device, account = unit.device, unit.account
-    latest = (context['readings'].get(device.id) if context is not None else db.session.scalar(select(Reading).where(Reading.device_id == device.id).order_by(Reading.timestamp.desc()).limit(1))) if device else None
+    latest = (context['readings'].get(device.id) if context is not None else db.session.scalar(select(Reading).where(Reading.device_id == device.id, Reading.source == device.source).order_by(Reading.timestamp.desc()).limit(1))) if device else None
     now = utcnow()
     recent = bool(device and device.last_seen and 0 <= (now - aware(device.last_seen)).total_seconds() < 30)
     fresh = bool(latest and 0 <= (now - aware(latest.timestamp)).total_seconds() < 90)
+    measurement_state = ('awaiting_readings' if latest is None else 'clock_ahead' if aware(latest.timestamp) > now
+                         else 'fresh' if fresh else 'stale')
     online = recent and fresh and not unit.archived_at
     tenant = context['tenants'].get(unit.id) if context is not None else current_tenant(unit.id)
     invitation,delivery=invitation_status(tenant) if tenant else (None,None)
@@ -108,6 +112,8 @@ def unit_json(unit, context=None):
                 power_status=unit.power_status if online else 'unknown', last_power_status=unit.power_status,
                 online=online, gateway_online=recent,
                 last_seen=iso(device.last_seen) if device else None, reading_at=iso(latest.timestamp) if latest else None,
+                last_received=iso(latest.received_at) if latest else None, measurement_state=measurement_state,
+                communication_state='recent_receipt' if recent else 'no_recent_receipt',
                 tenant_id=tenant.id if tenant else None, tenant_email=tenant.email if tenant else None,
                 invitation_status=invitation,email_delivery=delivery.status if delivery else None,
                 email_delivery_error=ERRORS.get(delivery.error_code) if delivery and delivery.error_code else None,
@@ -127,7 +133,8 @@ def hourly_totals(devices, since):
     else:
         hour = func.strftime('%Y-%m-%d %H:00:00', Reading.timestamp, '+8 hours')
     query = select(Reading.device_id, hour.label('hour'), func.sum(Reading.delta_kwh)).where(
-        Reading.device_id.in_(devices), Reading.timestamp >= since).group_by(Reading.device_id, hour)
+        Reading.device_id.in_(devices), Reading.timestamp >= since, Reading.timestamp <= utcnow(),
+        Reading.source == Device.source).join(Device, Device.id == Reading.device_id).group_by(Reading.device_id, hour)
     for device_id, local_hour, energy in db.session.execute(query):
         if isinstance(local_hour, str):
             local_hour = datetime.fromisoformat(local_hour)
@@ -148,6 +155,9 @@ def snapshot():
     days = [(local_now.date() - timedelta(days=6-i)) for i in range(7)]
     historical_days = [(local_now.date() - timedelta(days=29-i)) for i in range(30)]
     hourly, daily, historical, by_unit = {}, {}, {}, {device: Decimal('0') for device in devices}
+    unit_days = {device: set() for device in devices}
+    unit_periods = {device: [Decimal('0'), Decimal('0')] for device in devices}
+    bucket_devices = {'hourly': {}, 'daily': {}, 'history': {}}
     today = Decimal('0')
     today_devices = set()
     for device_id, local, energy in hourly_totals(devices, now-timedelta(days=30)):
@@ -155,12 +165,20 @@ def snapshot():
         hourly[key] = hourly.get(key, Decimal('0')) + energy
         daily[local.date()] = daily.get(local.date(), Decimal('0')) + energy
         historical[local.date()] = historical.get(local.date(), Decimal('0')) + energy
+        unit_days[device_id].add(local.date())
+        if local.date() >= days[0]: unit_periods[device_id][0] += energy
+        if local.date() >= historical_days[0]: unit_periods[device_id][1] += energy
+        for period_name, bucket in (('hourly', key), ('daily', local.date()), ('history', local.date())):
+            bucket_devices[period_name].setdefault(bucket, set()).add(device_id)
         if local.date() == local_now.date():
             today_devices.add(device_id)
             today += energy
             by_unit[device_id] += energy
     for item, unit in zip(unitdata, units):
         item['today_kwh'] = str(by_unit[unit.device.id]) if unit.device and unit.device.id in today_devices else None
+        seen = unit_days.get(unit.device.id, set()) if unit.device else set()
+        item['seven_day_kwh'] = str(unit_periods[unit.device.id][0]) if any(d >= days[0] for d in seen) else None
+        item['thirty_day_kwh'] = str(unit_periods[unit.device.id][1]) if any(d >= historical_days[0] for d in seen) else None
     rates = billing_rates().where(Rate.effective_at <= now)
     rate = db.session.scalar(rates.order_by(Rate.effective_at.desc()).limit(1))
     if not rate_covers(rate, now):
@@ -172,6 +190,50 @@ def snapshot():
         request_query = request_query.where(LoadRequest.user_id == current_user.id)
         transaction_query = transaction_query.where(Transaction.created_at >= current_user.created_at)
         notification_query = notification_query.where(Notification.created_at >= current_user.created_at)
+    pending_count = db.session.scalar(select(func.count()).select_from(request_query.where(LoadRequest.status == 'pending').subquery()))
+    period_starts = [datetime.combine(d, datetime.min.time(), MANILA).astimezone(timezone.utc)
+                     for d in (local_now.date(), days[0], historical_days[0])]
+    expense_query = select(*(func.coalesce(func.sum(case((Transaction.created_at >= start, -Transaction.amount), else_=0)), 0)
+                             for start in period_starts)).where(Transaction.unit_id.in_(ids), Transaction.kind == 'consumption', Transaction.created_at <= now)
+    credit_query = select(Transaction, LoadRequest.reference).outerjoin(LoadRequest, Transaction.load_request_id == LoadRequest.id).where(
+        Transaction.unit_id.in_(ids), Transaction.kind == 'credit', Transaction.created_at <= now)
+    if current_user.role == 'tenant':
+        expense_query = expense_query.where(Transaction.created_at >= current_user.created_at)
+        credit_query = credit_query.where(Transaction.created_at >= current_user.created_at)
+    expenses = db.session.execute(expense_query).one()
+    latest_credit = db.session.execute(credit_query.order_by(Transaction.created_at.desc(), Transaction.id.desc()).limit(1)).first()
+    model_id = select(ForecastModel.id).where(ForecastModel.unit_id == Device.unit_id, ForecastModel.source == Device.source).order_by(
+        ForecastModel.trained_at.desc(), ForecastModel.id.desc()).limit(1).correlate(Device).scalar_subquery()
+    latest_models = dict(db.session.execute(select(ForecastModel.unit_id, ForecastModel.trained_at).where(
+        ForecastModel.id.in_(select(model_id).select_from(Device).where(Device.id.in_(devices))))).all()) if devices else {}
+    for item in unitdata:
+        trained = latest_models.get(item['id'])
+        age = max(0, (now-aware(trained)).total_seconds()/86400) if trained else None
+        item.update(model_trained_at=iso(trained), model_retraining_due=bool(age is not None and age >= current_app.config['FORECAST_RETRAIN_DAYS']))
+    failed_mail = 0
+    if current_user.role == 'admin':
+        failed_mail = db.session.scalar(select(func.count(EmailOutbox.id)).join(User, User.id == EmailOutbox.user_id).where(
+            EmailOutbox.status == 'failed', EmailOutbox.created_at >= now-timedelta(days=7),
+            or_(EmailOutbox.unit_id.in_(ids), EmailOutbox.unit_id.is_(None)),
+            User.tenancy_ended_at.is_(None), or_(User.active.is_(True), User.activation_status == 'pending'),
+            or_(EmailOutbox.error_code.is_(None), EmailOutbox.error_code.not_in(['account_ineligible', 'link_expired', 'retry_window_expired']))))
+    operations = dict(active_units=len(unitdata), recent_receipts=sum(u['gateway_online'] for u in unitdata),
+        stale_units=sum(u['measurement_state'] == 'stale' for u in unitdata), awaiting_readings=sum(u['measurement_state'] == 'awaiting_readings' for u in unitdata),
+        low_balance_units=sum(Decimal(u['balance']) <= Decimal(u['threshold']) for u in unitdata), pending_requests=pending_count,
+        pending_activations=sum(bool(u['tenant_id'] and u['invitation_status'] != 'Activated') for u in unitdata),
+        failed_emails_recent=failed_mail, retraining_due=sum(u['model_retraining_due'] for u in unitdata))
+    actions = []
+    if current_user.role == 'admin':
+        for key, count, label, detail, view in (
+            ('pending_requests', pending_count, 'Review top-up requests', 'Verify payment before approving credit.', 'loads'),
+            ('pending_activations', operations['pending_activations'], 'Complete tenant invitations', 'Pending or expired accounts need activation or a replacement invitation.', 'units'),
+            ('unassigned', sum(not u['tenant_id'] for u in unitdata), 'Assign tenant accounts', 'These active units have no assigned tenant.', 'units'),
+            ('stale_units', sum(not u['online'] for u in unitdata), 'Inspect meter data', 'Fresh measurements and recent receipts are required for live monitoring.', 'devices'),
+            ('low_balance_units', operations['low_balance_units'], 'Review low prepaid credit', 'Balances are at or below the configured unit threshold.', 'units'),
+            ('failed_emails_recent', failed_mail, 'Review failed email delivery', 'Failed messages from the last seven days for current accounts; check delivery configuration.', 'notifications'),
+            ('rate', int(bool(unitdata) and rate is None), 'Confirm billing-rate coverage', 'No currently applicable billing rate is active. The reference price does not authorize charges.', 'settings'),
+            ('retraining_due', operations['retraining_due'], 'Review model retraining', 'Check fresh covered data and occupancy changes before requesting training.', 'forecast')):
+            if count: actions.append(dict(key=key, count=count, label=label, detail=detail, view=view))
     requests = db.session.scalars(request_query.order_by(LoadRequest.created_at.desc()).limit(100)).all()
     transactions = db.session.scalars(transaction_query.order_by(Transaction.created_at.desc(), Transaction.id.desc()).limit(40)).all()
     notifications = db.session.scalars(notification_query.order_by(Notification.created_at.desc()).limit(12)).all()
@@ -180,13 +242,19 @@ def snapshot():
                    simulation=current_app.config['SIMULATION_MODE'], updated_at=iso(now), units=unitdata,
                    summary=dict(balance=str(sum((Decimal(u['balance']) for u in unitdata), Decimal('0'))),
                                 today_kwh=str(today) if today_devices else None, online=sum(u['online'] for u in unitdata),
-                                pending=sum(r.status == 'pending' for r in requests),
+                                pending=pending_count,
                                 power_w=str(sum((Decimal(u['power'] or '0') for u in unitdata), Decimal('0'))) if any(u['online'] for u in unitdata) else None),
                    rate=str(rate.php_per_kwh) if rate else None,
                    utility_rate=utility_policy(),
-                   charts=dict(hourly=dict(labels=[h.strftime('%I %p').lstrip('0') for h in hours], values=[float(hourly[h]) if h in hourly else None for h in hours]),
-                               daily=dict(labels=[d.strftime('%a') for d in days], values=[float(daily[d]) if d in daily else None for d in days]),
-                               history=dict(labels=[d.strftime('%b %d') for d in historical_days], values=[float(historical[d]) if d in historical else None for d in historical_days])),
+                   operations=operations, actions=actions,
+                   insights=dict(seven_day_kwh=str(sum((Decimal(u['seven_day_kwh']) for u in unitdata if u['seven_day_kwh'] is not None), Decimal('0'))) if any(u['seven_day_kwh'] is not None for u in unitdata) else None,
+                       thirty_day_kwh=str(sum((Decimal(u['thirty_day_kwh']) for u in unitdata if u['thirty_day_kwh'] is not None), Decimal('0'))) if any(u['thirty_day_kwh'] is not None for u in unitdata) else None,
+                       deductions=dict(today=str(expenses[0]), seven_days=str(expenses[1]), thirty_days=str(expenses[2])),
+                       latest_topup=transaction_json(*latest_credit) if latest_credit else None,
+                       comparison=None, comparison_note='Recorded totals may contain gaps or partial days. A complete comparable-period coverage record is not available, so no percentage change is asserted.'),
+                   charts=dict(hourly=dict(labels=[h.strftime('%I %p').lstrip('0') for h in hours], values=[float(hourly[h]) if h in hourly else None for h in hours], timestamps=[h.isoformat() for h in hours], observed_units=[len(bucket_devices['hourly'].get(h, set())) for h in hours]),
+                               daily=dict(labels=[d.strftime('%a') for d in days], values=[float(daily[d]) if d in daily else None for d in days], timestamps=[d.isoformat() for d in days], observed_units=[len(bucket_devices['daily'].get(d, set())) for d in days]),
+                               history=dict(labels=[d.strftime('%b %d') for d in historical_days], values=[float(historical[d]) if d in historical else None for d in historical_days], timestamps=[d.isoformat() for d in historical_days], observed_units=[len(bucket_devices['history'].get(d, set())) for d in historical_days])),
                    requests=[load_json(r) for r in requests], transactions=[transaction_json(t) for t in transactions],
                    notifications=[dict(id=n.id, unit_id=n.unit_id, kind=n.kind, message=n.message, timestamp=iso(n.created_at)) for n in notifications],
                    events=[dict(device_id=e.device_id, kind=e.kind, state=e.state, message=e.message, timestamp=iso(e.created_at)) for e in events],
@@ -194,6 +262,22 @@ def snapshot():
                    dict(status='select_unit', message='Choose a dormitory unit',
                         detail='Select a unit above to view its XGBoost model and forecast.',
                         remaining_duration=None, horizon_hours=0, model=None, points=[], job=None))
+
+
+@api.get('/transactions')
+@login_required
+def get_transactions():
+    ids = [unit.id for unit in scoped_units()]
+    rows, paging = paginate(filtered_transactions(ids, current_user, request.args), request.args, Transaction)
+    return jsonify(transactions=[transaction_json(item, reference) for item, reference in rows], pagination=paging)
+
+
+@api.get('/load-requests')
+@login_required
+def get_load_requests():
+    ids = [unit.id for unit in scoped_units()]
+    rows, paging = paginate(filtered_requests(ids, current_user, request.args), request.args, LoadRequest)
+    return jsonify(requests=[load_json(item, amount) for item, amount in rows], pagination=paging)
 
 
 @api.post('/load-requests')
@@ -508,17 +592,15 @@ def export_transactions():
     include_archived = current_user.role == 'admin' and request.args.get('include_archived') == 'true'
     include_demo = current_user.role == 'admin' and request.args.get('include_demo') == 'true'
     ids = [u.id for u in scoped_units(include_archived=include_archived, include_demo=include_demo)]
-    query = select(Transaction).where(Transaction.unit_id.in_(ids))
-    if current_user.role == 'tenant':
-        query = query.where(Transaction.created_at >= current_user.created_at)
-    rows = db.session.scalars(query.order_by(Transaction.created_at.desc()).limit(10000)).all()
+    query = filtered_transactions(ids, current_user, request.args)
+    rows = db.session.execute(query.limit(10000)).all()
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(['transaction_id', 'unit', 'timestamp_utc', 'kind', 'amount_php', 'balance_after_php', 'description'])
     def safe(value):
         text = str(value)
         return "'" + text if text.startswith(('=', '+', '-', '@', '\t', '\r')) else text
-    for row in rows:
+    for row, reference in rows:
         writer.writerow([row.id, safe(row.unit.name), iso(row.created_at), row.kind, str(row.amount), str(row.balance_after), safe(row.description)])
     return Response(output.getvalue(), mimetype='text/csv', headers={'Content-Disposition': 'attachment; filename=dormenergy-transactions.csv'})
 

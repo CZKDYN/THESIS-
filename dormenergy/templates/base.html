@@ -8,9 +8,11 @@
   <title>{% block title %}DormEnergy · Smart prepaid energy{% endblock %}</title>
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/experience.css') }}">
   {% block scripts %}{% endblock %}
 </head>
 <body class="{% block bodyclass %}{% endblock %}">
+<a class="skip-link" href="#main-content">Skip to main content</a>
 <svg xmlns="http://www.w3.org/2000/svg" class="icon-library" aria-hidden="true">
 <symbol id="i-bolt" viewBox="0 0 24 24"><path d="m13 2-9 12h7l-1 8 10-12h-7l1-8Z"/></symbol>
 <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>

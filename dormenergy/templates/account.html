@@ -2,7 +2,7 @@
 {% from '_icons.html' import icon %}
 {% block bodyclass %}account-page{% endblock %}
 {% block body %}
-<main class="account-layout">
+<main class="account-layout" id="main-content" tabindex="-1">
   <a class="brand" href="{{ url_for('web.login') }}"><span class="brand-icon">{{ icon('bolt') }}</span><span>Dorm<span class="brand-accent">Energy</span></span></a>
   <article class="card account-card">
     <div class="card-heading"><div><h1>{{ 'Set up your administrator account' if kind == 'setup' else 'Change your password' if kind == 'password' else 'Your account' }}</h1><p>{{ 'Create the owner account for this installation.' if kind == 'setup' else 'Choose your own password before using the workspace.' if current_user.must_change_password else 'Manage your sign-in details.' }}</p></div></div>

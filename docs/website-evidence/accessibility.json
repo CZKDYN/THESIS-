@@ -1,0 +1,69 @@
+{
+  "axe_version": "4.14.0",
+  "synthetic_fixture_data": true,
+  "csp_enabled": true,
+  "states": [
+    {
+      "view": "login",
+      "violations": []
+    },
+    {
+      "view": "admin-overview",
+      "violations": []
+    },
+    {
+      "view": "transactions",
+      "violations": []
+    },
+    {
+      "view": "load-inbox",
+      "violations": []
+    },
+    {
+      "view": "forecast",
+      "violations": []
+    },
+    {
+      "view": "devices",
+      "violations": []
+    },
+    {
+      "view": "edit-unit-dialog",
+      "violations": []
+    },
+    {
+      "view": "mobile-navigation",
+      "violations": []
+    },
+    {
+      "view": "mobile-consumption",
+      "violations": []
+    },
+    {
+      "view": "mobile-load-dialog",
+      "violations": []
+    },
+    {
+      "view": "tenant-overview",
+      "violations": []
+    },
+    {
+      "view": "mobile-notifications",
+      "violations": []
+    },
+    {
+      "view": "mobile-account",
+      "violations": []
+    },
+    {
+      "view": "mobile-recovery",
+      "violations": []
+    },
+    {
+      "view": "mobile-invalid-activation",
+      "violations": []
+    }
+  ],
+  "violations": 0,
+  "limits": "Automated A/AA-tag checks and exercised keyboard paths; not a complete WCAG certification or manual screen-reader evaluation."
+}

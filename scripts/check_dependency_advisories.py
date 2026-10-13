@@ -14,7 +14,7 @@ def main():
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     requirements = set()
-    for filename in ('requirements.lock.txt', 'gateway/requirements.txt', 'gateway/requirements-dev.txt'):
+    for filename in ('requirements.lock.txt', 'requirements-browser.txt', 'gateway/requirements.txt', 'gateway/requirements-dev.txt'):
         for line in (root/filename).read_text().splitlines():
             if not line.strip() or line.startswith(('#', '-r')): continue
             requirement = Requirement(line)
