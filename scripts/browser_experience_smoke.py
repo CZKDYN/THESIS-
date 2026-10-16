@@ -15,7 +15,7 @@ import time
 from playwright.sync_api import expect, sync_playwright
 
 ROOT=Path(__file__).resolve().parents[1]
-ARTIFACTS=ROOT/'artifacts/website'
+ARTIFACTS=ROOT/os.getenv('EXPERIENCE_ARTIFACT_DIR','artifacts/website')
 SERVER=r'''
 import math,os,sys
 from datetime import timedelta
@@ -82,9 +82,9 @@ def main():
         if page.locator('#mobile-menu').is_visible():page.locator('#mobile-menu').click()
         page.locator(f'#sidebar .nav-link[data-view={view}]').click()
         expect(page.locator('#view-'+view)).to_be_visible()
-    def screenshot(page,name):
+    def screenshot(page,name,full_page=True):
         page.locator('#toast').evaluate('(node)=>node.hidden=true')
-        target=ARTIFACTS/(name+'.png');page.screenshot(path=target,full_page=True);screens.append(target.name)
+        target=ARTIFACTS/(name+'.png');page.screenshot(path=target,full_page=full_page);screens.append(target.name)
     def scan(page,name):
         if not os.getenv('AXE_CORE_PATH'):return
         page.add_script_tag(url=origin+'/static/validation-only/axe.js')
@@ -112,6 +112,29 @@ def main():
                     else:raise RuntimeError('Isolated UX fixture did not start.')
                     page.goto(origin+'/login');scan(page,'login');page.fill('#email','owner@experience.example.test');page.fill('#password',env['EXPERIENCE_TEST_PASSWORD'])
                     page.get_by_role('button',name='Sign in to workspace').click();page.wait_for_url('**/dashboard')
+                    assert page.locator('.workspace-label,.workspace-avatar,.prototype-note').count()==0
+                    expect(page.locator('#sidebar .profile')).to_contain_text('Experience fixture owner')
+                    expect(page.locator('#sidebar .profile')).to_contain_text('Administrator')
+                    assert page.locator('#sidebar .nav-group').count()==3
+                    assert 'PUP' not in page.locator('#sidebar').inner_text()
+                    page.locator('.system-information summary').click();expect(page.locator('.system-information-panel')).to_contain_text('Development build')
+                    expect(page.locator('#system-data-mode')).to_contain_text('Simulation');scan(page,'admin-system-information')
+                    page.locator('.system-information summary').click()
+                    checks.append('Minimal grouped sidebar removes both components from the DOM and retains authenticated profile, logout and accessible development information')
+                    nav(page,'settings');expect(page.locator('#utility-reference-rate')).to_have_value('14.7400')
+                    link=page.get_by_role('link',name='View official Meralco rate information',exact=False)
+                    assert link.get_attribute('href')=='https://company.meralco.com.ph/news-and-advisories/higher-residential-rates-october-2026'
+                    assert link.get_attribute('target')=='_blank' and {'noopener','noreferrer'} <= set(link.get_attribute('rel').split())
+                    assert link.locator('use').get_attribute('href')=='#i-external-link'
+                    expect(page.locator('#view-settings')).to_contain_text('October 2026 residential-rate advisory')
+                    assert page.locator('#utility-reference-rate').get_attribute('readonly') is not None
+                    rates=owner.request.get(origin+'/api/rates').json();assert rates['active_rate'] is None
+                    scan(page,'admin-rate-reference');screenshot(page,'admin-rates-1440')
+                    page.set_viewport_size({'width':390,'height':844})
+                    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+                    scan(page,'mobile-rate-reference');screenshot(page,'admin-rates-390')
+                    page.set_viewport_size({'width':1440,'height':1000});nav(page,'overview')
+                    checks.append('Official monthly advisory link has the expected HTTPS destination, new-tab protection and external indicator; the unverified PHP14.74 reference stays read-only with no active tariff (external availability not tested by this runner)')
                     expect(page.locator('#op-units')).to_have_text('3');expect(page.locator('#op-stale')).to_have_text('1')
                     expect(page.locator('#op-pending')).to_have_text('35');expect(page.locator('#op-activation')).to_have_text('1')
                     assert 'Historical fixture message' not in page.locator('#overview-alerts').inner_text()
@@ -190,11 +213,14 @@ def main():
                     checks.append('Serialized polling discards an older unit-filter reply; unknown numeric values and precise small ledger amounts remain distinct from zero')
                     for width in (360,390,768,1024,1440):
                         page.set_viewport_size({'width':width,'height':900});nav(page,'overview')
+                        assert page.locator('#sidebar .brand-icon').evaluate('(node)=>node.getBoundingClientRect().width>=31')
+                        assert page.locator('#sidebar .brand small').evaluate('(node)=>node.getBoundingClientRect().height<=parseFloat(getComputedStyle(node).lineHeight)+1')
                         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), f'Overview overflow at {width}'
                         nav(page,'transactions');assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'),f'Transaction overflow at {width}'
                         screenshot(page,f'admin-history-{width}');nav(page,'overview');screenshot(page,f'admin-overview-{width}')
                     page.set_viewport_size({'width':360,'height':800});page.locator('#mobile-menu').click()
                     scan(page,'mobile-navigation')
+                    screenshot(page,'admin-navigation-360',full_page=False)
                     assert page.locator('.workspace').evaluate('(el)=>el.inert') and page.locator('#mobile-menu').get_attribute('aria-expanded')=='true'
                     page.keyboard.press('Shift+Tab');assert page.evaluate("document.activeElement.closest('#sidebar')!==null")
                     page.keyboard.press('Escape');expect(page.locator('#mobile-menu')).to_be_focused();assert not page.locator('.workspace').evaluate('(el)=>el.inert')
@@ -202,9 +228,21 @@ def main():
                     expect(page.locator('#page-title')).to_be_focused();expect(page.locator('#detail-chart-summary')).to_contain_text('Gaps mean unavailable')
                     scan(page,'mobile-consumption')
                     checks.append('Five requested viewport widths, keyboard drawer focus/Escape/inert and accessible chart summaries')
+                    for width in (360,768,1440):
+                        page.set_viewport_size({'width':width,'height':600})
+                        if width==360:page.locator('#mobile-menu').click()
+                        expect(page.locator('#sidebar .profile button[aria-label="Sign out"]')).to_be_in_viewport()
+                        bounds=page.locator('#sidebar .profile').bounding_box();assert bounds['y']>=0 and bounds['y']+bounds['height']<=601
+                        assert page.locator('.sidebar-navigation').evaluate('(node)=>node.scrollHeight>node.clientHeight')
+                        if width==360:page.keyboard.press('Escape')
+                    page.set_viewport_size({'width':1440,'height':1000})
+                    checks.append('Short desktop/tablet/phone viewports scroll navigation independently while profile and logout stay visible')
                     tenant_page=tenant.new_page();tenant_page.on('pageerror',lambda error:errors.append(str(error)))
                     tenant_page.goto(origin+'/login');tenant_page.fill('#email','tenant1@experience.example.test');tenant_page.fill('#password',env['EXPERIENCE_TEST_PASSWORD'])
                     tenant_page.get_by_role('button',name='Sign in to workspace').click();tenant_page.wait_for_url('**/dashboard')
+                    assert tenant_page.locator('.workspace-label,.workspace-avatar,.prototype-note').count()==0
+                    expect(tenant_page.locator('#sidebar .profile')).to_contain_text('Fixture tenant 1')
+                    expect(tenant_page.locator('#sidebar .profile')).to_contain_text('Tenant')
                     expect(tenant_page.locator('#unit-count')).to_have_text('1');expect(tenant_page.locator('#latest-topup')).to_contain_text('₱500.00')
                     assert tenant_page.locator('[data-device-token]').count()==0
                     for path in ('/api/transactions','/api/load-requests','/api/transactions/export'):
@@ -235,6 +273,12 @@ def main():
                     tenant_page.set_viewport_size({'width':360,'height':800});tenant_page.goto(origin+'/account');scan(tenant_page,'mobile-account')
                     tenant_page.goto(origin+'/forgot-password');scan(tenant_page,'mobile-recovery')
                     tenant_page.goto(origin+'/activate');scan(tenant_page,'mobile-invalid-activation')
+                    for session,context in ((page,owner),(tenant_page,tenant)):
+                        session.goto(origin+'/dashboard');session.wait_for_function('()=>typeof state!=="undefined" && state && !snapshotBusy')
+                        if session.locator('#mobile-menu').is_visible():session.locator('#mobile-menu').click()
+                        session.locator('#sidebar .profile button[aria-label="Sign out"]').click();session.wait_for_url('**/login')
+                        assert context.request.get(origin+'/api/snapshot').status==401
+                    checks.append('Administrator and tenant profile logout controls submit the existing CSRF-protected form and revoke browser access')
                     assert not errors,errors
                     browser.close()
                 report=dict(checks_passed=len(checks),checks=checks,errors=errors,accessibility=accessibility,screenshots=screens,

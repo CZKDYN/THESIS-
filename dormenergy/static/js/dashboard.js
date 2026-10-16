@@ -122,7 +122,8 @@ function renderDevices() {
 }
 function render() {
   const admin=state.user.role==='admin', units=state.units;
-  $('#mode-pill').innerHTML=icon('info')+(state.simulation?'Simulation environment':'Live workspace');
+  $('#mode-pill').innerHTML=icon('info')+(state.simulation?'Simulation environment':'Hardware mode');
+  $('#system-data-mode').textContent=state.simulation?'Simulation · synthetic readings are labeled':'Hardware · connection evidence is shown per meter';
   $('#stat-balance').textContent=pesos(state.summary.balance);
   $('#stat-energy').textContent=num(state.summary.today_kwh);
   const powers=units.map(livePower).filter(value=>value!==null);

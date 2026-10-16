@@ -1,0 +1,30 @@
+{
+  "url": "https://company.meralco.com.ph/news-and-advisories/higher-residential-rates-october-2026",
+  "official_domain": "company.meralco.com.ph",
+  "resource_type": "October 2026 residential-rate advisory",
+  "verification_date": "2026-10-16",
+  "verification_timezone": "Asia/Manila",
+  "user_browser_confirmation": "It opens the October 2026 rate advisory",
+  "automated_fetch": {
+    "verified": false,
+    "curl_exit_code": 56,
+    "proxy_connect_status": 403,
+    "origin_http_status": null,
+    "reason": "Environment proxy denied HTTPS CONNECT before reaching Meralco"
+  },
+  "rejected_candidate": {
+    "url": "https://company.meralco.com.ph/node/8985",
+    "user_browser_result": "It shows an error"
+  },
+  "markup_checks": {
+    "target": "_blank",
+    "rel": [
+      "noopener",
+      "noreferrer"
+    ],
+    "external_link_indicator": true
+  },
+  "rate_applicability_verified": false,
+  "stored_tariffs_changed": false,
+  "php_14_74_reference_confirmed": false
+}

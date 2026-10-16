@@ -61,7 +61,7 @@ def main():
         admin.fill('#confirm-password',OWNER)
         admin.get_by_role('button',name='Create administrator').click()
         admin.wait_for_function('() => typeof state!=="undefined" && state && state.units.length===0')
-        assert admin.locator('#mode-pill').inner_text()=='Live workspace'
+        assert admin.locator('#mode-pill').inner_text()=='Hardware mode'
         assert admin.locator('#stat-power').inner_text()=='—'
         assert admin.locator('#stat-energy').inner_text()=='—'
         assert admin_context.request.get(BASE+'/health').json()['mode']=='hardware'

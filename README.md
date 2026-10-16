@@ -127,3 +127,5 @@ The unmerged `feature/software-stabilization` branch integrates the gateway and 
 ## Website experience review
 
 `feature/website-experience` targets the unmerged stabilization branch. It adds current operational tasks, clear tenant credit/usage/ledger summaries, evidence-based device states, transparent forecast comparisons, filtered paginated histories, responsive layouts and resilient keyboard-friendly updates. Read the [audit, implementation, actual browser screenshots and validation](docs/website-experience.md) before reviewing the branch. The [PR description](docs/website-experience-pr.md) and controlled release checklist are included. This branch has not been merged or deployed to Render.
+
+The follow-up `feature/dashboard-refinement` branch removes the academic sidebar cards, simplifies navigation/footer styling and replaces the failing rate link with an official monthly Meralco advisory the owner confirmed opens. See [refinement details, screenshots and validation](docs/dashboard-refinement.md). The PHP14.74 reference still requires the applicable bill and tariff period to be confirmed.

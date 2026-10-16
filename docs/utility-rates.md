@@ -4,7 +4,7 @@ The owner supplied **PHP 14.74/kWh** as a Meralco reference on 12 October 2026. 
 
 EPIRA (Republic Act No. 9136) provides the electricity-sector regulatory framework; it does not supply one universal nationwide PHP/kWh figure. Applicable charges depend on the distribution utility, customer class, consumption/billing conditions and period. A news headline quoting a representative Meralco residential rate should not automatically determine a dormitory main-meter tariff. A software lock alone does not establish permission to resell electricity or certify a tenant-billing arrangement.
 
-Public source links for operator review: [EPIRA text](https://lawphil.net/statutes/repacts/ra2001/ra_9136_2001.html), [Meralco rate information](https://www.meralco.com.ph/residential/billing-payment/understanding-your-bill/rates-archives), and the [Energy Regulatory Commission](https://www.erc.gov.ph/). These links were not successfully retrieved or independently verified during this update. Confirm the actual applicable utility bill/tariff and any ERC requirements before charging real tenants.
+Public source links for operator review: [EPIRA text](https://lawphil.net/statutes/repacts/ra2001/ra_9136_2001.html), [Meralco October 2026 residential-rate advisory](https://company.meralco.com.ph/news-and-advisories/higher-residential-rates-october-2026), and the [Energy Regulatory Commission](https://www.erc.gov.ph/). See the [Meralco reference availability record](#meralco-reference-availability) below; link access does not verify tariff applicability. Confirm the actual applicable utility bill/tariff and any ERC requirements before charging real tenants.
 
 ## What is locked now
 
@@ -52,3 +52,14 @@ Tests cover protected UI/API access, pending references without billing, idempot
 `python scripts/browser_https_smoke.py` exercises the locked display, forged API rejection, desktop/phone layout and existing login/account/activation/recovery flows over real local TLS. It uses only test fixtures and a temporary database. No real email or physical meter is used. See [current actual test results](testing.md).
 
 Evidence includes ignored artifacts/utility-rate-tests.xml, utility-full-tests.xml, utility-portable-tests.xml, utility-migration-preservation.json, browser-https-smoke.json, utility-rate-desktop.png and utility-rate-mobile.png. Latest hosted deployment and the actual Meralco source/rate applicability remain unverified.
+
+## Meralco reference availability
+
+On 16 October 2026 (Asia/Manila), the old dashboard archive destination was removed after the owner reported a Page Not Found response. Both supplied alternatives were requested with normal HTTPS verification:
+
+- `https://company.meralco.com.ph/node/8985` — supplied as “Summary Schedule of Rates”; the owner also reported an error when opening it. It is not used as the replacement.
+- https://company.meralco.com.ph/news-and-advisories/higher-residential-rates-october-2026 — the owner confirmed this opens the October 2026 rate advisory. This is the dashboard replacement, labeled as a monthly residential-rate advisory.
+
+The environment proxy returned CONNECT 403 before reaching either site (curl HTTP status 000); this is not a Meralco origin response. Link availability was confirmed in the owner's browser, not independently fetched by this environment. The dashboard link uses the official `company.meralco.com.ph` HTTPS domain, `target="_blank"`, `rel="noopener noreferrer"`, a clear label and an external-link indicator. Future months may need a reviewed reference-link update; there is no automated rate fetching. A monthly residential news rate must not automatically become this dormitory's tariff.
+
+No rate, billing source, validity period, balance or historical charge was changed. The PHP14.74 reference remains unverified pending the applicable bill and tariff period.

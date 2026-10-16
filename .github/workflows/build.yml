@@ -3,7 +3,7 @@ name: Build and test
   push:
     branches: [main]
   pull_request:
-    branches: [main, feature/software-stabilization]
+    branches: [main, feature/software-stabilization, feature/website-experience]
   workflow_dispatch:
 permissions:
   contents: read
